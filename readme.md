@@ -1,6 +1,6 @@
 # Jekyll Relationships
 
-Allows Jekyll collection documents to specify their relationships with each other, via arbitrary many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each item's frontmatter.
+Plygin for Jekyll that allows collection documents to specify their relationships with each other, via many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each item's frontmatter.
 
 ## Configuration
 
@@ -14,15 +14,14 @@ relationships:
 	# The frontmatter keys that specify relationships - global defaults
 	frontmatter: # see Frontmatter below
 		base: relationships # prepend to other keys
-		primary: id # because of base, treated as `relationships.id`
+		primary: nil # use Document path as primary key
 		foreign: <collection> # because of base, treated as `relationships.<foreign>`
 
 	# Modify the shape of the foreign reference object
 	references: # see References below
 		id: <key>
 		collection: <collection>
-		title: title
-		url: url
+		page: <page>
 
 	# Settings for tree relationships
 	tree: # see Trees below
@@ -93,6 +92,12 @@ Each array item has:
   * `bidirectional`: like `link`, but whenever a link is added, it is also added to the target in the reverse direction automatically.
 
 Duplicate or clashing relationship definitions will throw an error. A bidirectional relationship "uses up" the reverse definition, so "from A to B, bidirectional" followed by a "from B to A, link/bidirectional" definition is a duplicate and throws an error.
+
+The defined relationships will be processed and resolved. This will:
+
+* Ensure arrays of references are complete
+* Upgrade the references between documents to richer objects
+* Protect against invalid or duplicate references (A can't link to B twice in the same array)
 
 
 ## Frontmatter
@@ -171,7 +176,13 @@ relationships:
 	- Clothing
 ```
 
-The `references` config lets you modify the shape of reference hashes. The crucial key within `references` is whichever has the exact value `<key>`. This identifies the property where the foreign key is given, and is required. A key may also have the value `<collection>` which will give the collection in which the foreign document exists. Example:
+The `references` config lets you modify the shape of reference hashes. Its keys are arbitrary, and its values can be:
+
+* `<key>` exactly (required): this key gives the foreign key, and must be present.
+* `<collection>`: this key gives the collection in which the foreign document exists.
+* `<page>`: this key will be set to the actual `Jekyll::Document` instance for the foreign document.
+
+Example:
 
 ```yaml
 # _config.yml
@@ -183,15 +194,19 @@ relationships:
 			url: permalink
 			distance: 1 # constant
 			# collection is removed
+			page: <page>
 ```
 
-When relationships are processed, all references are upgraded to the hash form. As part of this, properties from the foreign document can be drawn into the hash. The properties to bring in are given by the other keys in `references`. The values here are properties or frontmatter paths that will be read from the foreign document, which will be set to the keys given in the hash. This can use both Liquid properties like `url` and frontmatter data like `title`.
+When relationships are processed, references are read loosely: strings are foreign keys, hashes look at the foreign key/collection keys only, ignoring others. Following resolution, all references are upgraded to the defined hash form (merging over any other keys on an existing hash).
 
-### Keys
 
-**Primary keys must be unique** within a collection. However, if you are able to set your site up so that they are unique across *all* collections, then you no longer need to know the collection of a document when linking to it: just the foreign key is needed.
+## Primary Keys
+
+**Primary keys must be unique** within a collection. However, if you set things up so that primary keys are unique across *all* collections, then you no longer need to know the collection of a document when linking to it: just the foreign key is needed.
 
 If the collection isn't given by the reference, all collections will be searched to find the foreign key. If non-unique keys are found this will raise an error.
+
+When the `primary` config is `nil`, (which is the default), the document "path" is used as the primary key. This guarantees uniqueness across the whole site. Document path is `Document#relative_path` with leading `_` and trailing `Document.extname` removed, giving strings like `products/shoes` for `shoes.md` in the `products` collection.
 
 
 ## Trees
@@ -281,6 +296,7 @@ This document's links are modified with the `link` and `unlink` methods:
 * `link(reference)`
   * `reference` gives the document to link to, from this document. It must be in the `@to` collection.
   * `reference:` (optional named parameter): gives a hash that the created reference hash will merge over, providing arbitrary addititional properties to the hash.
+  * Adding a duplicate link has no effect.
 * `unlink(reference)`
   * Remove the link to the `reference`d document.
   * `unlink` (no reference) removes all links on this document to the `@to` collection.
@@ -290,6 +306,8 @@ Because the class extends `Resolvers::Base` it has access to these helpers:
 * `relationships(reference, to: collection)`
   * Gets an array of reference hashes for the relationships from the `reference`d document to the collection passed as `to`.
     * This causes the requested relationships to be resolved immediately on that foreign document, creating a recursion. Cyclic dependencies are detected and throw an error.
+  * If `to` is omitted, the value of `@to` is used.
+  * You can get those relationships on *this* document to the target collection: this will return current links. You can modify from there.
 * Tree-traversal methods:
   * `parents(reference)`: shorthand for `ancestors(reference, max: 1)`.
   * `ancestors(reference)`
@@ -357,3 +375,32 @@ keywords:
 	self: itself
 	#etc
 ```
+
+
+## Examples
+
+```yml
+# Portfolio site
+relationships:
+	frontmatter:
+		base: ''
+		primary: meta.id
+		foreign: data.<collection>
+
+	relationships:
+	# Clients have an organisation type, industry and location
+	- from: clients
+		to: org_types, industries, locations
+	# Deliverables, industries and locations can nest inside themselves
+	- from: deliverables, industries, locations
+		to: self
+		mode: parent
+	- from: deliverables
+		to: services
+	- from: projects
+		to:
+		- services
+		- deliverables
+		- collection: clients
+			frontmatter:
+				foreign: data.client
