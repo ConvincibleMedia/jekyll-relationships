@@ -1,0 +1,31 @@
+# Essential
+.git
+.env
+.bundle
+
+# OS
+*.lnk
+*.db
+*.ini
+.DS_Store
+
+# Temp/cache/logs
+*.log
+**/tmp
+**/cache
+**/logs
+
+# Working files/dirs
+coverage
+.rspec_status
+spec/reports
+/prior
+
+# Settings
+.vscode
+agents.md
+
+# Gem
+pkg
+*.gem
+Gemfile.lock
