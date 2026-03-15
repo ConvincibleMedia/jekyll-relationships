@@ -1,6 +1,6 @@
 # Jekyll Relationships
 
-Plygin for Jekyll that allows collection documents to specify their relationships with each other, via many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each item's frontmatter.
+Plugin for Jekyll that allows collection documents to specify their relationships with each other, via many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each document's frontmatter.
 
 ## Configuration
 
@@ -190,9 +190,6 @@ relationships:
 	frontmatter:
 		references:
 			link_to: <key> # foreign key is now stored on the property 'link_to'
-			price: settings.price
-			url: permalink
-			distance: 1 # constant
 			# collection is removed
 			page: <page>
 ```
@@ -241,7 +238,7 @@ Tree relationships are processed as follows:
 	* Protections against loops (including the 0-length case of self-reference) are built-in. If an ancestor/descendant chain attempts to make a link that forms a loop, the chain is broken before adding that link and the attempted link is deleted. A warning is issued but processing otherwise continues.
 * Having built the graph, the tree links are filled in on each document:
   * `parents` and `children` are set as arrays of the immediate ancestors/descendants as reference hashes.
-  * `ancestors` and `descendants` are set as arrays where each element is a reference hash. In this situation the hash gains the property `distance`, which is 0 for self, 1 for immediate parent/child, 2 for grandparent/grandchild, etc. The arrays are in ascending distance order.
+  * `ancestors` and `descendants` are set as arrays where each element is a reference hash. In this situation the hash gains the property `distance`, which is 0 for self, 1 for immediate parent/child, 2 for grandparent/grandchild, etc. The arrays are in ascending distance order. If an item can be reached by multiple paths, the shortest path gives the distance.
 
 ### Max
 
@@ -265,7 +262,7 @@ You can insert special logic that modifies how the links from X to Y are resolve
 
 Resolvers run for normal relationships (`link` or `bidirectional`), not Tree relationships.
 
-Resolvers must be placed in `Jekyll::Plugins::Relationships::Resolvers` and inherit from `Jekyll::Plugins::Relationships::Types::Base`. They could be defined by files in your `_plugins` folder, for instance.
+Resolvers must be placed in `Jekyll::Plugins::Relationships::Resolvers` and inherit from `Jekyll::Plugins::Relationships::Resolvers::Base`. They could be defined by files in your `_plugins` folder, for instance.
 
 Each Resolver must specify the relationship it applies to with the `from` and `to` directives. These have the same syntax and interpretation as `from` and `to` in a relationship definition. The Resolver will run for any implied pair of collections.
 
@@ -341,7 +338,7 @@ class ProjectServices < Jekyll::Plugins::Relationships::Resolvers::Base
 		relationships(to: 'deliverables').each do |deliverable|
 			ancestors(deliverable, min: 0).each do |ancestor|
 				relationships(ancestor, to: 'services').each do |service|
-					link(to: service, reference: { distance: distance(ancestor) + distance(service) })
+					link(service, reference: { distance: distance(ancestor) + distance(service) })
 				end
 			end
 		end
@@ -362,7 +359,7 @@ end
 
 ## Recursive Resolution
 
-Relationships are resolved recursively, while also guaranteeing that each relationship and document is resolved exactly once.
+Relationships are resolved recursively, while also guaranteeing that each relationship and document is resolved exactly once. E.g. if in order to resolve X we need the final state of Y, we recurse into Y and resolve it first.
 
 
 ## Keywords
@@ -373,7 +370,7 @@ In many places, certain keyword strings have special meaning. In case these stri
 keywords:
 	base: prepend
 	self: itself
-	#etc
+	#etc for all reserved tokens that can be used in a context where collection names or frontmatter keys can also be given
 ```
 
 
@@ -400,7 +397,10 @@ relationships:
 	- from: projects
 		to:
 		- services
-		- deliverables
+		- collection: deliverables
+			frontmatter:
+				foreign: data.deliverables, data.body.details.deliverables
 		- collection: clients
 			frontmatter:
 				foreign: data.client
+```
