@@ -16,6 +16,8 @@ relationships:
 		base: relationships # prepend to other keys
 		primary: nil # use Document path as primary key
 		foreign: <collection> # because of base, treated as `relationships.<foreign>`
+		output: nil # see Output below
+
 
 	# Modify the shape of the foreign reference object
 	references: # see References below
@@ -128,6 +130,10 @@ frontmatter:
 
 	In `products` documents, this would find links to `categories` at `links.categories_links` and links to `tags` at `links.tags_links`.
 * `foreign` can be an array of frontmatter locations where references will be read. These will all be accumulated.
+
+### Output
+
+Relationships are read from the keys you give, and processed. Processing may modify the relationships, add/removing some. This will be written back into the frontmatter at the first location defined in `foreign`. However, if you want to leave this alone, a separate key `output` gives the frontmatter location where you want the final set of relationships to be written.
 
 ### Base
 
@@ -315,7 +321,7 @@ Because the class extends `Resolvers::Base` it has access to these helpers:
   * `descendants(reference)`: equivalent to `ancestors` but looking in the opposite direction.
 * `document(reference)`: retrieves the `reference`d document.
   * Only valid for items participating in relationships.
-  * If that item itself has defined relationships, it recurses to resolve those first.
+  * If that document itself has defined relationships, it recurses to resolve those first, unless that document is this document.
   * Returns the actual `Jekyll::Document`.
 
 The `reference` parameter in all the above:
