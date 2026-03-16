@@ -8,3 +8,6 @@ via: self, deliverables
 frontmatter:
 	foreign:
 		deliverables: data.deliverables
+
+
+importing, flattening, output, multiple outputs?
