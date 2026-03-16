@@ -13,10 +13,11 @@ class Configuration
 	# expansion, duplicate detection, and frontmatter override precedence.
 	class Parser
 		# Builds one parser for the current configuration.
-		def initialize(raw_config:, string_array:, global_frontmatter:, keywords:)
+		def initialize(raw_config:, string_array:, global_frontmatter:, global_tree_settings:, keywords:)
 			@raw_config = raw_config
 			@string_array = string_array
 			@global_frontmatter = global_frontmatter
+			@global_tree_settings = global_tree_settings
 			@keywords = keywords
 		end
 
@@ -48,7 +49,13 @@ class Configuration
 				raise ConfigurationError, "Relationship entry #{entry_index + 1} must define at least one `to` target." if targets.empty?
 
 				relationship_frontmatter = Configuration::HashUtilities.fetch_hash_value(entry, 'frontmatter')
+				relationship_tree = Configuration::HashUtilities.fetch_hash_value(entry, 'tree')
 				relationship_mode = normalise_mode(Configuration::HashUtilities.fetch_hash_value(entry, 'mode'))
+				effective_relationship_frontmatter = @global_frontmatter.merge(relationship_frontmatter)
+				effective_relationship_tree_settings = @global_tree_settings.merge_level(
+					frontmatter_override: relationship_frontmatter,
+					tree_override: relationship_tree
+				)
 
 				from_collections.each do |from_collection|
 					collections << from_collection
@@ -60,8 +67,12 @@ class Configuration
 							current_from_collection: from_collection
 						).each do |to_collection|
 							collections << to_collection
-							effective_mode = normalise_mode(target.fetch('mode', relationship_mode))
-							effective_frontmatter = @global_frontmatter.merge(relationship_frontmatter).merge(target['frontmatter'])
+							effective_mode = normalise_mode(target['mode'].nil? ? relationship_mode : target['mode'])
+							effective_frontmatter = effective_relationship_frontmatter.merge(target['frontmatter'])
+							effective_tree_settings = effective_relationship_tree_settings.merge_level(
+								frontmatter_override: target['frontmatter'],
+								tree_override: target['tree']
+							)
 
 							if tree_mode?(effective_mode)
 								register_tree_relationship(
@@ -71,6 +82,7 @@ class Configuration
 									to_collection: to_collection,
 									mode: effective_mode,
 									frontmatter: effective_frontmatter,
+									tree_settings: effective_tree_settings,
 									sequence: sequence
 								)
 								sequence += 1
@@ -146,7 +158,7 @@ class Configuration
 		end
 
 		# Adds one concrete tree relationship definition.
-		def register_tree_relationship(tree_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, sequence:)
+		def register_tree_relationship(tree_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, tree_settings:, sequence:)
 			ensure_unoccupied_pair!(occupancy, from_collection, to_collection, "tree relationship #{from_collection} <-> #{to_collection}")
 			ensure_unoccupied_pair!(occupancy, to_collection, from_collection, "tree relationship #{to_collection} <-> #{from_collection}") unless from_collection == to_collection
 
@@ -155,6 +167,7 @@ class Configuration
 				to_collection: to_collection,
 				primary_path: frontmatter.primary_path,
 				parent_child_pairs: parent_child_pairs(from_collection: from_collection, to_collection: to_collection, mode: mode),
+				tree_settings: tree_settings,
 				sequence: sequence
 			)
 
@@ -204,15 +217,27 @@ class Configuration
 						{ 'collection' => collection.to_s.strip }
 					end
 				when Hash
-					[{
-						'collection' => Configuration::HashUtilities.fetch_hash_value(target_entry, 'collection').to_s.strip,
-						'frontmatter' => Configuration::HashUtilities.fetch_hash_value(target_entry, 'frontmatter'),
-						'mode' => Configuration::HashUtilities.fetch_hash_value(target_entry, 'mode')
-					}]
+					[build_target_descriptor(target_entry)]
 				else
 					raise ConfigurationError, '`to` entries must be strings or hashes.'
 				end
 			end
+		end
+
+		# Builds one explicit target descriptor while preserving whether optional
+		# keys were actually present in the source config.
+		def build_target_descriptor(target_entry)
+			descriptor = {
+				'collection' => Configuration::HashUtilities.fetch_hash_value(target_entry, 'collection').to_s.strip
+			}
+
+			%w[frontmatter tree mode].each do |key|
+				next unless Configuration::HashUtilities.hash_key?(target_entry, key)
+
+				descriptor[key] = Configuration::HashUtilities.fetch_hash_value(target_entry, key)
+			end
+
+			descriptor
 		end
 
 		# Expands keyword targets such as `self`, `others`, and `all`.

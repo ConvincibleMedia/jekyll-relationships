@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'jekyll-relationships/trees/frontmatter_paths'
 require 'jekyll-relationships/trees/edge_builder'
 
 module Jekyll
@@ -25,52 +24,66 @@ class Graph
 		@ancestor_cache = {}
 		@descendant_cache = {}
 		@primary_path_by_collection = {}
-		@path_configuration = FrontmatterPaths.new(
-			global_frontmatter: @configuration.global_frontmatter,
-			tree_settings: @configuration.tree_settings
-		)
+		@tree_collections = @configuration.tree_relationships.each_with_object(Set.new) do |definition, collections|
+			collections << definition.from_collection
+			collections << definition.to_collection
+			@primary_path_by_collection[definition.from_collection] ||= definition.primary_path
+			@primary_path_by_collection[definition.to_collection] ||= definition.primary_path
+		end
 		@edge_builder = EdgeBuilder.new(
 			graph: self,
 			configuration: @configuration,
 			registry: @registry,
-			data_path: @data_path,
-			path_configuration: @path_configuration
+			data_path: @data_path
 		)
 	end
 
 	# Builds every configured tree edge.
 	def build!
-		seed_primary_paths
 		@edge_builder.build!
 	end
 
 	# Returns true when one document is part of any tree relationship.
 	def participating?(document)
-		@primary_path_by_collection.key?(document.collection.label)
+		@tree_collections.include?(document.collection.label)
 	end
 
 	# Returns immediate parents as canonical reference hashes.
-	def parents_for(document)
-		@parents[document].map { |parent| build_reference(parent) }
+	def parents_for(document, primary_path: nil)
+		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
+		@parents[document].map { |parent| build_reference(parent, primary_path: resolved_primary_path) }
 	end
 
 	# Returns immediate children as canonical reference hashes.
-	def children_for(document)
-		@children[document].map { |child| build_reference(child) }
+	def children_for(document, primary_path: nil)
+		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
+		@children[document].map { |child| build_reference(child, primary_path: resolved_primary_path) }
 	end
 
 	# Returns ancestor references filtered by minimum and maximum distance.
-	def ancestors_for(document, min: 0, max: -1)
-		filter_distances(distance_map_for(document: document, direction: :up), min: min, max: max)
+	def ancestors_for(document, primary_path: nil, min: 0, max: -1)
+		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
+		filter_distances(
+			distance_map_for(document: document, direction: :up),
+			primary_path: resolved_primary_path,
+			min: min,
+			max: max
+		)
 	end
 
 	# Returns descendant references filtered by minimum and maximum distance.
-	def descendants_for(document, min: 0, max: -1)
-		filter_distances(distance_map_for(document: document, direction: :down), min: min, max: max)
+	def descendants_for(document, primary_path: nil, min: 0, max: -1)
+		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
+		filter_distances(
+			distance_map_for(document: document, direction: :down),
+			primary_path: resolved_primary_path,
+			min: min,
+			max: max
+		)
 	end
 
 	# Adds one parent-child edge unless it would break tree guarantees.
-	def add_edge(parent_document:, child_document:)
+	def add_edge(parent_document:, child_document:, tree_settings:)
 		return if edge_exists?(parent_document: parent_document, child_document: child_document)
 
 		if parent_document == child_document
@@ -78,12 +91,12 @@ class Graph
 			return
 		end
 
-		if maximum_reached?(maximum: @configuration.tree_settings.max_parents, items: @parents[child_document])
+		if maximum_reached?(maximum: tree_settings.max_parents, items: @parents[child_document])
 			warn("Ignoring extra parent for `#{child_document.relative_path}` because the configured parent maximum has been reached.")
 			return
 		end
 
-		if maximum_reached?(maximum: @configuration.tree_settings.max_children, items: @children[parent_document])
+		if maximum_reached?(maximum: tree_settings.max_children, items: @children[parent_document])
 			warn("Ignoring extra child for `#{parent_document.relative_path}` because the configured child maximum has been reached.")
 			return
 		end
@@ -100,39 +113,78 @@ class Graph
 
 	# Writes the final tree output back into document frontmatter.
 	def write_back!
-		tree_documents.each do |document|
-			write_immediate_links(
-				document: document,
-				singular_path: @path_configuration.parent,
-				plural_path: @path_configuration.parents,
-				values: parents_for(document),
-				maximum: @configuration.tree_settings.max_parents
-			)
-			write_immediate_links(
-				document: document,
-				singular_path: @path_configuration.child,
-				plural_path: @path_configuration.children,
-				values: children_for(document),
-				maximum: @configuration.tree_settings.max_children
-			)
-			@data_path.write(document.data, @path_configuration.ancestors, ancestors_for(document, min: 0))
-			@data_path.write(document.data, @path_configuration.descendants, descendants_for(document, min: 0))
+		@configuration.tree_relationships.each do |definition|
+			write_definition_back!(definition)
 		end
 	end
 
 	# Returns every document participating in tree relationships.
 	def tree_documents
-		@primary_path_by_collection.keys.flat_map { |collection| @registry.documents_for(collection) }.uniq
+		@tree_collections.to_a.flat_map { |collection| @registry.documents_for(collection) }.uniq
 	end
 
 	private
 
-	# Captures the preferred primary path for each tree collection.
-	def seed_primary_paths
-		@configuration.tree_relationships.each do |definition|
-			@primary_path_by_collection[definition.from_collection] ||= definition.primary_path
-			@primary_path_by_collection[definition.to_collection] ||= definition.primary_path
+	# Writes tree output for one concrete relationship definition.
+	def write_definition_back!(definition)
+		frontmatter = definition.tree_settings.frontmatter
+
+		definition_documents(definition).each do |document|
+			parent_values = parents_for(document, primary_path: definition.primary_path)
+			child_values = children_for(document, primary_path: definition.primary_path)
+			ancestor_values = ancestors_for(document, primary_path: definition.primary_path, min: 0)
+			descendant_values = descendants_for(document, primary_path: definition.primary_path, min: 0)
+
+			if frontmatter.output_path
+				@data_path.write(
+					document.data,
+					frontmatter.output_path,
+					frontmatter.output_payload(
+						parent_value: parent_values.first,
+						parents_value: parent_values,
+						child_value: child_values.first,
+						children_value: child_values,
+						ancestors_value: ancestor_values,
+						descendants_value: descendant_values,
+						max_parents: definition.tree_settings.max_parents,
+						max_children: definition.tree_settings.max_children
+					)
+				)
+				next
+			end
+
+			write_immediate_links(
+				document: document,
+				singular_path: frontmatter.parent_output_path,
+				plural_path: frontmatter.parents_output_path,
+				values: parent_values,
+				maximum: definition.tree_settings.max_parents
+			)
+			write_immediate_links(
+				document: document,
+				singular_path: frontmatter.child_output_path,
+				plural_path: frontmatter.children_output_path,
+				values: child_values,
+				maximum: definition.tree_settings.max_children
+			)
+			@data_path.write(document.data, frontmatter.ancestors_output_path, ancestor_values)
+			@data_path.write(document.data, frontmatter.descendants_output_path, descendant_values)
 		end
+	end
+
+	# Returns the documents touched by one tree definition.
+	def definition_documents(definition)
+		[definition.from_collection, definition.to_collection].flat_map do |collection|
+			@registry.documents_for(collection)
+		end.uniq
+	end
+
+	# Chooses the requested primary path, or the collection's first configured
+	# tree primary path when callers use the public helper API without one.
+	def resolve_primary_path(document:, primary_path:)
+		return primary_path unless primary_path.nil?
+
+		@primary_path_by_collection[document.collection.label]
 	end
 
 	# Returns true when one edge already exists.
@@ -187,18 +239,17 @@ class Graph
 	end
 
 	# Filters one distance map to the requested range and builds references.
-	def filter_distances(distance_map, min:, max:)
+	def filter_distances(distance_map, primary_path:, min:, max:)
 		distance_map.each_with_object([]) do |(document, distance), references|
 			next if distance < min
 			next if max != -1 && distance > max
 
-			references << build_reference(document, distance)
+			references << build_reference(document, primary_path: primary_path, distance: distance)
 		end
 	end
 
 	# Builds one canonical reference hash, optionally including distance.
-	def build_reference(document, distance = nil)
-		primary_path = @primary_path_by_collection[document.collection.label]
+	def build_reference(document, primary_path:, distance: nil)
 		reference = @configuration.reference_template.build(
 			document: document,
 			key: @registry.key_for(document, primary_path: primary_path)

@@ -9,16 +9,18 @@ module Definitions
 # Stores the final configuration for one tree relationship definition.
 #
 # Tree relationships define which parent-child collection directions are valid
-# and which primary-key scheme should be used to resolve references.
+# and which frontmatter, maximum, URL, and primary-key rules should be used to
+# resolve references for this concrete relationship definition.
 class TreeRelationship
-	attr_reader :from_collection, :to_collection, :primary_path, :sequence
+	attr_reader :from_collection, :to_collection, :primary_path, :tree_settings, :sequence
 
 	# Captures the allowed parent-child directions for one tree definition.
-	def initialize(from_collection:, to_collection:, primary_path:, parent_child_pairs:, sequence:)
+	def initialize(from_collection:, to_collection:, primary_path:, parent_child_pairs:, tree_settings:, sequence:)
 		@from_collection = from_collection
 		@to_collection = to_collection
 		@primary_path = primary_path
 		@parent_child_pairs = parent_child_pairs
+		@tree_settings = tree_settings
 		@sequence = sequence
 	end
 

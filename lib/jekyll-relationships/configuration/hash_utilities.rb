@@ -11,6 +11,13 @@ class Configuration
 	module HashUtilities
 		module_function
 
+		# Returns true when a string- or symbol-keyed hash includes one key.
+		def hash_key?(hash, key)
+			return false unless hash.is_a?(Hash)
+
+			hash.key?(key) || hash.key?(key.to_s) || hash.key?(key.to_sym)
+		end
+
 		# Reads one string- or symbol-keyed hash value.
 		def fetch_hash_value(hash, key)
 			return nil unless hash.is_a?(Hash)

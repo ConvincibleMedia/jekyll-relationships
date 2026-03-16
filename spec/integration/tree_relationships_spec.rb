@@ -286,4 +286,136 @@ RSpec.describe 'tree relationships' do
 			expect(reference_ids(root.data.fetch('data').fetch('branches'))).to eq(['topics/root', 'topics/leaf'])
 		end
 	end
+
+	it 'applies tree overrides at relationship and target level with key-level merging' do
+		relationships = {
+			'frontmatter' => {
+				'base' => 'global_frontmatter'
+			},
+			'tree' => {
+				'frontmatter' => {
+					'base' => 'global_tree',
+					'parent' => 'global_parent',
+					'child' => 'global_child',
+					'parents' => 'global.parents',
+					'children' => 'global.children',
+					'ancestors' => 'global.ancestors',
+					'descendants' => 'global.descendants'
+				}
+			},
+			'relationships' => [
+				{
+					'from' => 'topics',
+					'to' => [
+						{
+							'collection' => 'self',
+							'frontmatter' => {
+								'base' => 'target_frontmatter'
+							},
+							'tree' => {
+								'frontmatter' => {
+									'output' => 'written_tree',
+									'descendants' => 'family.down'
+								}
+							}
+						}
+					],
+					'mode' => 'parent',
+					'frontmatter' => {
+						'base' => 'relationship_frontmatter'
+					},
+					'tree' => {
+						'frontmatter' => {
+							'base' => 'relationship_tree',
+							'parent' => ['up.one', 'up.two'],
+							'parents' => 'family.up',
+							'children' => 'family.children'
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('topics', 'root'),
+			collection_document('topics', 'other-root'),
+			collection_document('topics', 'leaf', {
+				'target_frontmatter' => {
+					'up' => {
+						'one' => 'topics/root',
+						'two' => 'topics/other-root'
+					}
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[topics], relationships: relationships, files: files) do |site, _files|
+			root = document_for(site, 'topics', 'root')
+			leaf = document_for(site, 'topics', 'leaf')
+
+			leaf_tree = leaf.data.fetch('target_frontmatter').fetch('written_tree')
+			root_tree = root.data.fetch('target_frontmatter').fetch('written_tree')
+
+			expect(reference_ids(leaf_tree.fetch('family').fetch('up'))).to eq(['topics/root', 'topics/other-root'])
+			expect(reference_ids(leaf_tree.fetch('global').fetch('ancestors'))).to eq(['topics/leaf', 'topics/root', 'topics/other-root'])
+			expect(reference_ids(root_tree.fetch('family').fetch('down'))).to eq(['topics/root', 'topics/leaf'])
+		end
+	end
+
+	it 'lets target-level tree frontmatter base override the target-level frontmatter base' do
+		relationships = {
+			'frontmatter' => {
+				'base' => 'global_frontmatter'
+			},
+			'relationships' => [
+				{
+					'from' => 'topics',
+					'to' => [
+						{
+							'collection' => 'self',
+							'frontmatter' => {
+								'base' => 'target_frontmatter'
+							},
+							'tree' => {
+								'frontmatter' => {
+									'base' => 'target_tree',
+									'output' => 'written_tree',
+									'parent' => ['up.one', 'up.two']
+								}
+							}
+						}
+					],
+					'mode' => 'parent',
+					'tree' => {
+						'frontmatter' => {
+							'parents' => 'family.up'
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('topics', 'root'),
+			collection_document('topics', 'other-root'),
+			collection_document('topics', 'leaf', {
+				'target_tree' => {
+					'up' => {
+						'one' => 'topics/root',
+						'two' => 'topics/other-root'
+					}
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[topics], relationships: relationships, files: files) do |site, _files|
+			leaf = document_for(site, 'topics', 'leaf')
+
+			expect(leaf.data).not_to have_key('target_frontmatter')
+			expect(reference_ids(leaf.data.fetch('target_tree').fetch('written_tree').fetch('family').fetch('up'))).to eq([
+				'topics/root',
+				'topics/other-root'
+			])
+		end
+	end
 end

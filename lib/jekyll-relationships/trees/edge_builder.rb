@@ -12,19 +12,18 @@ module Trees
 # can focus on storing edges and answering ancestry queries.
 class EdgeBuilder
 	# Builds one edge builder for the current graph.
-	def initialize(graph:, configuration:, registry:, data_path:, path_configuration:)
+	def initialize(graph:, configuration:, registry:, data_path:)
 		@graph = graph
 		@configuration = configuration
 		@registry = registry
 		@data_path = data_path
-		@path_configuration = path_configuration
 		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 	end
 
 	# Builds every configured tree edge.
 	def build!
 		build_frontmatter_edges
-		build_url_edges if @configuration.tree_settings.url?
+		build_url_edges
 	end
 
 	private
@@ -49,14 +48,20 @@ class EdgeBuilder
 
 	# Reads parent references from child documents.
 	def read_parent_references(definition:, parent_collection:, child_collection:)
+		path_configuration = definition.tree_settings.frontmatter
+
 		@registry.documents_for(child_collection).each do |child_document|
-			@path_configuration.parent_input_paths.each do |path|
+			path_configuration.parent_input_paths.each do |path|
 				parse_references(@data_path.read(child_document.data, path)).each do |reference|
 					parent_document = resolve_reference(reference: reference, primary_path: definition.primary_path)
 					next unless parent_document
 					next unless parent_document.collection.label == parent_collection
 
-					@graph.add_edge(parent_document: parent_document, child_document: child_document)
+					@graph.add_edge(
+						parent_document: parent_document,
+						child_document: child_document,
+						tree_settings: definition.tree_settings
+					)
 				end
 			end
 		end
@@ -64,14 +69,20 @@ class EdgeBuilder
 
 	# Reads child references from parent documents.
 	def read_child_references(definition:, parent_collection:, child_collection:)
+		path_configuration = definition.tree_settings.frontmatter
+
 		@registry.documents_for(parent_collection).each do |parent_document|
-			@path_configuration.child_input_paths.each do |path|
+			path_configuration.child_input_paths.each do |path|
 				parse_references(@data_path.read(parent_document.data, path)).each do |reference|
 					child_document = resolve_reference(reference: reference, primary_path: definition.primary_path)
 					next unless child_document
 					next unless child_document.collection.label == child_collection
 
-					@graph.add_edge(parent_document: parent_document, child_document: child_document)
+					@graph.add_edge(
+						parent_document: parent_document,
+						child_document: child_document,
+						tree_settings: definition.tree_settings
+					)
 				end
 			end
 		end
@@ -81,6 +92,8 @@ class EdgeBuilder
 	def build_url_edges
 		url_index = build_url_index
 		@configuration.tree_relationships.each do |definition|
+			next unless definition.tree_settings.url?
+
 			definition.parent_child_pairs.each do |parent_collection, child_collection|
 				@registry.documents_for(child_collection).each do |child_document|
 					parts = normalised_url_parts(child_document)
@@ -91,7 +104,11 @@ class EdgeBuilder
 					next unless parents
 
 					parents.each do |parent_document|
-						@graph.add_edge(parent_document: parent_document, child_document: child_document)
+						@graph.add_edge(
+							parent_document: parent_document,
+							child_document: child_document,
+							tree_settings: definition.tree_settings
+						)
 					end
 				end
 			end

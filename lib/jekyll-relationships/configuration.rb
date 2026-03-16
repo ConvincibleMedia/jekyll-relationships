@@ -5,6 +5,7 @@ require 'jekyll-relationships/definitions/tree_relationship'
 require 'jekyll-relationships/configuration/defaults'
 require 'jekyll-relationships/configuration/hash_utilities'
 require 'jekyll-relationships/configuration/frontmatter'
+require 'jekyll-relationships/configuration/tree_frontmatter'
 require 'jekyll-relationships/configuration/tree_settings'
 require 'jekyll-relationships/configuration/parser'
 
@@ -24,11 +25,13 @@ class Configuration
 	def initialize(site_config)
 		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 		@raw_config = Configuration::HashUtilities.fetch_hash_value(site_config, 'relationships') || {}
+		global_frontmatter_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'frontmatter')
+		global_tree_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'tree')
 		@keywords = build_keywords(Configuration::HashUtilities.fetch_hash_value(@raw_config, 'keywords'))
 		@global_frontmatter = Frontmatter.new(
 			raw_config: Configuration::HashUtilities.merge_hash(
 				Defaults::FRONTMATTER,
-				Configuration::HashUtilities.fetch_hash_value(@raw_config, 'frontmatter')
+				global_frontmatter_override
 			),
 			keywords: @keywords,
 			string_array: @string_array
@@ -37,14 +40,18 @@ class Configuration
 			config: build_reference_config,
 			keywords: @keywords
 		)
-		@tree_settings = TreeSettings.new(
-			raw_config: Configuration::HashUtilities.fetch_hash_value(@raw_config, 'tree')
+		@tree_settings = TreeSettings.defaults(
+			string_array: @string_array
+		).merge_level(
+			frontmatter_override: global_frontmatter_override,
+			tree_override: global_tree_override
 		)
 
 		parsed_relationships = Parser.new(
 			raw_config: @raw_config,
 			string_array: @string_array,
 			global_frontmatter: @global_frontmatter,
+			global_tree_settings: @tree_settings,
 			keywords: @keywords
 		)
 
@@ -106,7 +113,9 @@ class Configuration
 			Configuration::HashUtilities.fetch_hash_value(@raw_config, 'frontmatter'),
 			'references'
 		)
-		return nested_frontmatter if nested_frontmatter.is_a?(Hash)
+		if nested_frontmatter.is_a?(Hash)
+			raise ConfigurationError, '`relationships.references` must be configured directly under `relationships`, not under `relationships.frontmatter`.'
+		end
 
 		default_references
 	end

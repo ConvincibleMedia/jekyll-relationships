@@ -178,6 +178,28 @@ RSpec.describe 'relationships configuration' do
 		end
 	end
 
+	it 'rejects reference config nested under frontmatter' do
+		relationships = {
+			'frontmatter' => {
+				'references' => {
+					'slug' => '<key>'
+				}
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha'),
+			collection_document('services', 'design')
+		)
+
+		expect do
+			build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) { |_site, _files| nil }
+		end.to raise_error(JekyllTestHarness::SiteBuildError, /relationships\.references.*frontmatter/i)
+	end
+
 	it 'resolves key-only references when primary keys are unique site-wide' do
 		relationships = {
 			'frontmatter' => {
