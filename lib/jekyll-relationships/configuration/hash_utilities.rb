@@ -15,7 +15,7 @@ class Configuration
 		def fetch_hash_value(hash, key)
 			return nil unless hash.is_a?(Hash)
 
-			Jekyll::Plugins::Support::FrontmatterPath.read_hash(hash, key)
+			Jekyll::Plugins::Relationships::Support::FrontmatterPath.read_hash(hash, key)
 		end
 
 		# Deep-merges two hashes without mutating either.

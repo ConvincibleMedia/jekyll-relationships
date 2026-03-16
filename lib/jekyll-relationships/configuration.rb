@@ -22,7 +22,7 @@ class Configuration
 
 	# Builds the full configuration model from `site.config`.
 	def initialize(site_config)
-		@string_array = Jekyll::Plugins::Support::StringArray.new
+		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 		@raw_config = Configuration::HashUtilities.fetch_hash_value(site_config, 'relationships') || {}
 		@keywords = build_keywords(Configuration::HashUtilities.fetch_hash_value(@raw_config, 'keywords'))
 		@global_frontmatter = Frontmatter.new(

@@ -14,7 +14,7 @@ class DataPath
 
 	# Builds one reusable accessor.
 	def initialize
-		@reader = Jekyll::Plugins::Support::FrontmatterPath.new
+		@reader = Jekyll::Plugins::Relationships::Support::FrontmatterPath.new
 	end
 
 	# Reads one value from a nested frontmatter hash.
@@ -28,11 +28,11 @@ class DataPath
 	def write(data, path, value)
 		raise ArgumentError, 'Cannot write to a blank frontmatter path.' if blank_path?(path)
 
-		segments = Jekyll::Plugins::Support::FrontmatterPath.split_path(path)
+		segments = Jekyll::Plugins::Relationships::Support::FrontmatterPath.split_path(path)
 		current_hash = data
 
 		segments[0..-2].each do |segment|
-			next_hash = Jekyll::Plugins::Support::FrontmatterPath.read_hash(current_hash, segment)
+			next_hash = Jekyll::Plugins::Relationships::Support::FrontmatterPath.read_hash(current_hash, segment)
 			unless next_hash.is_a?(Hash)
 				next_hash = {}
 				current_hash[segment] = next_hash

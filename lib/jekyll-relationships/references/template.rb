@@ -156,7 +156,7 @@ class Template
 	def fetch_hash_value(hash, property)
 		return nil unless property
 
-		Jekyll::Plugins::Support::FrontmatterPath.read_hash(hash, property)
+		Jekyll::Plugins::Relationships::Support::FrontmatterPath.read_hash(hash, property)
 	end
 
 	# Builds one active placeholder token including its angle brackets.

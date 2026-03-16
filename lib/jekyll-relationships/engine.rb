@@ -23,7 +23,7 @@ class Engine
 		@configuration = Configuration.new(@site.config)
 		@registry = Documents::Registry.new(site: @site, collections: @configuration.collections)
 		@data_path = Jekyll::Plugins::Relationships::Support::DataPath.new
-		@string_array = Jekyll::Plugins::Support::StringArray.new
+		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 		@tree_graph = Trees::Graph.new(
 			site: @site,
 			configuration: @configuration,

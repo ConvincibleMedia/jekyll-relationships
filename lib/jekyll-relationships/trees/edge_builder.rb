@@ -18,7 +18,7 @@ class EdgeBuilder
 		@registry = registry
 		@data_path = data_path
 		@path_configuration = path_configuration
-		@string_array = Jekyll::Plugins::Support::StringArray.new
+		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 	end
 
 	# Builds every configured tree edge.

@@ -2,6 +2,7 @@
 
 module Jekyll
 module Plugins
+module Relationships
 
 module Support
 
@@ -151,6 +152,6 @@ class StringArray
 end
 
 end
-
+end
 end
 end

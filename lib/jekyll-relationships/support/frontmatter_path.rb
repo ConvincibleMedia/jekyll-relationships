@@ -2,6 +2,7 @@
 
 module Jekyll
 module Plugins
+module Relationships
 
 module Support
 
@@ -30,7 +31,7 @@ class FrontmatterPath
 	def self.build_equivalent_lookup(raw_equivalents, split_delimiter: StringArray::DEFAULT_DELIMITER)
 		return {} if raw_equivalents == false || raw_equivalents.nil?
 
-		string_array = Jekyll::Plugins::Support::StringArray.new(delimiter: split_delimiter)
+		string_array = Jekyll::Plugins::Relationships::Support::StringArray.new(delimiter: split_delimiter)
 		lookup = {}
 		groups = raw_equivalents.is_a?(Array) ? raw_equivalents : [raw_equivalents]
 
@@ -211,6 +212,6 @@ class FrontmatterPath
 end
 
 end
-
+end
 end
 end
