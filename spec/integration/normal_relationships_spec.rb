@@ -132,6 +132,40 @@ RSpec.describe 'normal relationships' do
 		end
 	end
 
+	it 'resolves collection placeholders in separate output paths' do
+		relationships = {
+			'frontmatter' => {
+				'base' => 'data',
+				'foreign' => 'refs.<collection>',
+				'output' => 'resolved.<collection>'
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services, articles' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'data' => {
+					'refs' => {
+						'services' => ['services/design'],
+						'articles' => ['articles/launch-notes']
+					}
+				}
+			}),
+			collection_document('services', 'design'),
+			collection_document('articles', 'launch-notes')
+		)
+
+		build_relationship_site(collections: %w[projects services articles], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			resolved = project.data.fetch('data').fetch('resolved')
+
+			expect(reference_ids(resolved.fetch('services'))).to eq(['services/design'])
+			expect(reference_ids(resolved.fetch('articles'))).to eq(['articles/launch-notes'])
+		end
+	end
+
 	it 'mirrors bidirectional links onto the reverse relationship when read from frontmatter' do
 		relationships = {
 			'relationships' => [

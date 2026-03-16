@@ -169,7 +169,7 @@ class Configuration
 				to_collection: to_collection,
 				primary_path: frontmatter.primary_path,
 				foreign_paths: frontmatter.foreign_paths_for(to_collection: to_collection),
-				output_path: frontmatter.output_path,
+				output_path: frontmatter.output_path_for(to_collection: to_collection),
 				sequence: sequence,
 				reads_frontmatter: reads_frontmatter,
 				bidirectional: bidirectional

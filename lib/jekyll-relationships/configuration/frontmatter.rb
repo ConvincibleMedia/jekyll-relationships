@@ -45,16 +45,16 @@ class Configuration
 				string_path = path.to_s.strip
 				raise ConfigurationError, 'Foreign paths cannot be blank.' if string_path.empty?
 
-				apply_base(string_path.gsub(collection_placeholder, to_collection))
+				resolve_collection_path(path: string_path, to_collection: to_collection)
 			end.uniq
 		end
 
 		# Returns the resolved output path, if one is configured.
-		def output_path
+		def output_path_for(to_collection:)
 			raw_output = fetch_value('output')
 			return nil if raw_output.nil? || raw_output.to_s.strip.empty?
 
-			apply_base(raw_output.to_s)
+			resolve_collection_path(path: raw_output.to_s.strip, to_collection: to_collection)
 		end
 
 		# Returns one arbitrary path with the active base applied.
@@ -84,6 +84,11 @@ class Configuration
 			return base if path.to_s.empty?
 
 			"#{base}.#{path}"
+		end
+
+		# Resolves one path that may include the active collection placeholder.
+		def resolve_collection_path(path:, to_collection:)
+			apply_base(path.gsub(collection_placeholder, to_collection))
 		end
 
 		# Returns the active `<collection>` placeholder token.
