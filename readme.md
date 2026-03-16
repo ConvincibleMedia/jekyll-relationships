@@ -201,11 +201,10 @@ Example:
 ```yaml
 # _config.yml
 relationships:
-  frontmatter:
-    references:
-      link_to: <key> # foreign key is now stored on the property 'link_to'
-      # collection is removed
-      page: <page>
+  references:
+    link_to: <key> # foreign key is now stored on the property 'link_to'
+    collection: nil # collection is removed
+    page: <page>
 ```
 
 When relationships are processed, references are read loosely: strings are foreign keys, hashes look at the foreign key/collection keys only, ignoring others. Following resolution, all references are upgraded to the defined hash form (merging over any other keys on an existing hash).
