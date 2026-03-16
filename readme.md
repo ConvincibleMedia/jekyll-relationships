@@ -203,7 +203,7 @@ Example:
 relationships:
   references:
     link_to: <key> # foreign key is now stored on the property 'link_to'
-    collection: nil # collection is removed
+    # collection is removed
     page: <page>
 ```
 
