@@ -8,13 +8,12 @@ require 'jekyll-relationships/errors'
 require 'jekyll-relationships/support/string_array'
 require 'jekyll-relationships/support/frontmatter_path'
 require 'jekyll-relationships/support/data_path'
-require 'jekyll-relationships/reference_template'
+require 'jekyll-relationships/references/template'
 require 'jekyll-relationships/configuration'
-require 'jekyll-relationships/document_registry'
-require 'jekyll-relationships/tree_graph'
+require 'jekyll-relationships/documents/registry'
 require 'jekyll-relationships/resolvers/base'
 require 'jekyll-relationships/engine'
-require 'jekyll-relationships/generator'
+require 'jekyll-relationships/generators/relationships'
 
 module Jekyll
 module Plugins

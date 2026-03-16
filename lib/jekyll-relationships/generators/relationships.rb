@@ -4,15 +4,15 @@ module Jekyll
 module Plugins
 
 module Relationships
+module Generators
 
 # Jekyll generator entry point for relationship processing.
 #
-# The generator runs late enough that collections and plugin-defined resolver
-# classes already exist, then mutates document frontmatter before rendering.
-class Generator < Jekyll::Generator
-
+# The generator runs early so later generators and renderers can rely on the
+# resolved relationship data already being present on documents.
+class Relationships < Jekyll::Generator
 	safe true
-	priority :lowest
+	priority :high
 
 	# Processes the site relationships during the generate phase.
 	def generate(site)
@@ -20,6 +20,7 @@ class Generator < Jekyll::Generator
 	end
 end
 
+end
 end
 
 end

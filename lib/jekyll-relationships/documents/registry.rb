@@ -4,12 +4,13 @@ module Jekyll
 module Plugins
 
 module Relationships
+module Documents
 
 # Indexes participating documents by collection and primary key.
 #
 # Indices are built lazily per primary-key path so relationship definitions can
 # use different key schemes without rebuilding unrelated lookups.
-class DocumentRegistry
+class Registry
 
 	# Builds the registry over the collections used by the configuration.
 	def initialize(site:, collections:)
@@ -34,6 +35,13 @@ class DocumentRegistry
 		return [] unless site_collection
 
 		site_collection.docs
+	end
+
+	# Builds every requested primary-key index so duplicates fail eagerly.
+	def validate_primary_paths!(primary_paths:)
+		Array(primary_paths).uniq.each do |primary_path|
+			index_for(primary_path)
+		end
 	end
 
 	# Computes the active primary key for one document and scheme.
@@ -113,6 +121,7 @@ class DocumentRegistry
 	end
 end
 
+end
 end
 
 end

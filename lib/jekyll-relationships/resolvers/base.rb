@@ -16,30 +16,49 @@ class Base
 	@registered_subclasses = []
 
 	class << self
-		attr_reader :from_definition, :to_definition, :registered_subclasses
+		attr_reader :from_definition, :to_definition
 
-		# Tracks subclasses so the engine can discover them later.
+		# Tracks subclasses while their class bodies are still being declared.
 		def inherited(subclass)
-			@registered_subclasses ||= []
-			@registered_subclasses << subclass
+			Base.remove_registered_subclass(subclass: subclass)
 			super
 		end
 
 		# Declares or reads the resolver's `from` selector.
 		def from(value = nil)
-			@from_definition = value unless value.nil?
+			unless value.nil?
+				@from_definition = value
+				Base.refresh_registered_subclass(subclass: self)
+			end
 			@from_definition
 		end
 
 		# Declares or reads the resolver's `to` selector.
 		def to(value = nil)
-			@to_definition = value unless value.nil?
+			unless value.nil?
+				@to_definition = value
+				Base.refresh_registered_subclass(subclass: self)
+			end
 			@to_definition
 		end
 
-		# Returns every registered resolver subclass.
+		# Returns every resolver subclass whose `from` and `to` selectors are complete.
 		def registered_subclasses
 			@registered_subclasses ||= []
+		end
+
+		# Synchronises one resolver subclass with the shared registry after class-level declarations change.
+		def refresh_registered_subclass(subclass:)
+			remove_registered_subclass(subclass: subclass)
+			return if subclass == Base
+			return if subclass.from_definition.nil? || subclass.to_definition.nil?
+
+			registered_subclasses << subclass
+		end
+
+		# Removes one resolver subclass from the shared registry while declaration is incomplete.
+		def remove_registered_subclass(subclass:)
+			registered_subclasses.delete(subclass)
 		end
 	end
 

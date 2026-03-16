@@ -8,39 +8,38 @@ How documents link to each other is specified by configuration.
 
 ```yaml
 relationships:
-	# The relationships that exist on this site
+  # The relationships that exist on this site
   relationships: # array, see Relationships below
 
-	# The frontmatter keys that specify relationships - global defaults
-	frontmatter: # see Frontmatter below
-		base: relationships # prepend to other keys
-		primary: nil # use Document path as primary key
-		foreign: <collection> # because of base, treated as `relationships.<foreign>`
-		output: nil # see Output below
+  # The frontmatter keys that specify relationships - global defaults
+  frontmatter: # see Frontmatter below
+    base: relationships # prepend to other keys
+    primary: nil # use Document path as primary key
+    foreign: <collection> # because of base, treated as `relationships.<foreign>`
+    output: nil # see Output below
 
+  # Modify the shape of the foreign reference object
+  references: # see References below
+    id: <key>
+    collection: <collection>
+    page: <page>
 
-	# Modify the shape of the foreign reference object
-	references: # see References below
-		id: <key>
-		collection: <collection>
-		page: <page>
+  # Settings for tree relationships
+  tree: # see Trees below
+    frontmatter:
+      parent: parent # which keys specify a single parent
+      child: child # which keys specify a single child
+      parents: parents # which keys specify multiple parents
+      children: children # which keys specify multiple children
+      ancestors: ancestors # key on which to set ancestors
+      descendants: descendants # key on which to set descendants
+    max:
+      parents: -1 # max parents per item (-1 = unlimited)
+      children: -1 # max children per item
+    url: false # infer parent by item url
 
-	# Settings for tree relationships
-	tree: # see Trees below
-		frontmatter:
-			parent: parent # which keys specify a single parent
-			child: child # which keys specify a single child
-			parents: parents # which keys specify multiple parents
-			children: children # which keys specify multiple children
-			ancestors: ancestors # key on which to set ancestors
-			descendants: descendants # key on which to set descendants
-		max:
-			parents: -1 # max parents per item (-1 = unlimited)
-			children: -1 # max children per item
-		url: false # infer parent by item url
-
-	# Override keywords in case they are a clash with your collection/frontmatter names
-	keywords: # see Keywords below
+  # Override keywords in case they are a clash with your collection/frontmatter names
+  keywords: # see Keywords below
 ```
 
 The values shown above are the built-in defaults that will apply even if you don't specify these settings at all.
@@ -56,23 +55,23 @@ Throughout the config, any item which can be an array may also be given as a sin
 relationships:
 # categories and tags are each in a tree
 - from: categories, tags
-	to: self
-	mode: parent
+  to: self
+  mode: parent
 # products
 - from: products
-	to: categories, tags
-	frontmatter: # override for this relationship
-		base: data # override `base` for this `frontmatter`
-		foreign: <collection>, links # find references at `data.categories`, `data.tags` and `data.links`.
+  to: categories, tags
+  frontmatter: # override for this relationship
+    base: data # override `base` for this `frontmatter`
+    foreign: <collection>, links # find references at `data.categories`, `data.tags` and `data.links`.
 - from: products
-	to: # array form
-	- collection: products # hash form
-		frontmatter: # override frontmatter for this `to` target
-			foreign: body.subproducts
-	- services # regular string form
-	- collection: product-types
-		mode: tree # override `mode` for this `to` target
-	mode: bidirectional
+  to: # array form
+  - collection: products # hash form
+    frontmatter: # override frontmatter for this `to` target
+      foreign: body.subproducts
+  - services # regular string form
+  - collection: product-types
+    mode: tree # override `mode` for this `to` target
+  mode: bidirectional
 ```
 
 Each array item has:
@@ -113,27 +112,36 @@ You specify where in the frontmatter these primary/foreign keys exist, using:
 
 ```yaml
 frontmatter:
-	primary: id # the frontmatter key `id` holds the primary key value
-	foreign: <collection> # <collection> is replaced by the label of a `to` collection. The frontmatter key that matches this label holds a reference to a document in that collection.
+  primary: id # the frontmatter key `id` holds the primary key value
+  foreign: <collection> # <collection> is replaced by the label of a `to` collection. The frontmatter key that matches this label holds a reference to a document in that collection.
 ```
 
 * Both keys can be specified with dot-notation to access deeply nested keys, e.g. `meta.details.relationships.id`.
 * `<collection>` is valid only within `foreign`. Example:
-	
-	```yaml
-	relationships:
-	- from: products
-		to: categories, tags
-		frontmatter:
-			foreign: links.<collection>_links
-	```
+  
+  ```yaml
+  relationships:
+  - from: products
+    to: categories, tags
+    frontmatter:
+      foreign: links.<collection>_links
+  ```
 
-	In `products` documents, this would find links to `categories` at `links.categories_links` and links to `tags` at `links.tags_links`.
+  In `products` documents, this would find links to `categories` at `links.categories_links` and links to `tags` at `links.tags_links`.
 * `foreign` can be an array of frontmatter locations where references will be read. These will all be accumulated.
 
 ### Output
 
-Relationships are read from the keys you give, and processed. Processing may modify the relationships, add/removing some. This will be written back into the frontmatter at the first location defined in `foreign`. However, if you want to leave this alone, a separate key `output` gives the frontmatter location where you want the final set of relationships to be written.
+Relationships are read from the keys you give, and processed. Processing may modify the relationships, add/removing some. This will be written back into the frontmatter at the first location defined in `foreign`. However, if you want to leave this alone, a separate key `output` gives the frontmatter location where you want the final set of relationships to be written. It may contain `<collection>`. Example:
+
+```yaml
+relationships:
+  frontmatter:
+    base: ''
+    primary: meta.id
+    foreign: data.<collection>
+    output: meta.relationships.<collection>
+```
 
 ### Base
 
@@ -141,9 +149,9 @@ Any definition of `frontmatter` may specify a `base` which will be prepended to 
 
 ```yaml
 frontmatter:
-	base: links
-	primary: id # treated as `links.id`
-	foreign: <collection> # treated as `links.<collection>`
+  base: links
+  primary: id # treated as `links.id`
+  foreign: <collection> # treated as `links.<collection>`
 ```
 
 The default `base` is `relationships` i.e. all information about relationships is by default read from and stored under a `relationships` key on any document in the site.
@@ -176,10 +184,10 @@ Example:
 # superbrand-shoes.md
 title: SuperBrand Shoes
 relationships:
-	categories:
-	- Shoes
-	- id: Trainers
-	- Clothing
+  categories:
+  - Shoes
+  - id: Trainers
+  - Clothing
 ```
 
 The `references` config lets you modify the shape of reference hashes. Its keys are arbitrary, and its values can be:
@@ -193,11 +201,11 @@ Example:
 ```yaml
 # _config.yml
 relationships:
-	frontmatter:
-		references:
-			link_to: <key> # foreign key is now stored on the property 'link_to'
-			# collection is removed
-			page: <page>
+  frontmatter:
+    references:
+      link_to: <key> # foreign key is now stored on the property 'link_to'
+      # collection is removed
+      page: <page>
 ```
 
 When relationships are processed, references are read loosely: strings are foreign keys, hashes look at the foreign key/collection keys only, ignoring others. Following resolution, all references are upgraded to the defined hash form (merging over any other keys on an existing hash).
@@ -241,7 +249,7 @@ Tree relationships are processed as follows:
   * All parents/children specified by either method, and by any relationship, are accumulated.
   * This happens across all items, in an initial pass, building a complete graph.
   * Documents can choose whether to specify parents, children, both, or neither. The graph will be built up using the information given in either direction. E.g. if A can be a parent of B, then it will look for B-children of A, and A-parents of B.
-	* Protections against loops (including the 0-length case of self-reference) are built-in. If an ancestor/descendant chain attempts to make a link that forms a loop, the chain is broken before adding that link and the attempted link is deleted. A warning is issued but processing otherwise continues.
+  * Protections against loops (including the 0-length case of self-reference) are built-in. If an ancestor/descendant chain attempts to make a link that forms a loop, the chain is broken before adding that link and the attempted link is deleted. A warning is issued but processing otherwise continues.
 * Having built the graph, the tree links are filled in on each document:
   * `parents` and `children` are set as arrays of the immediate ancestors/descendants as reference hashes.
   * `ancestors` and `descendants` are set as arrays where each element is a reference hash. In this situation the hash gains the property `distance`, which is 0 for self, 1 for immediate parent/child, 2 for grandparent/grandchild, etc. The arrays are in ascending distance order. If an item can be reached by multiple paths, the shortest path gives the distance.
@@ -274,13 +282,13 @@ Each Resolver must specify the relationship it applies to with the `from` and `t
 
 ```ruby
 class ProductsAndCategories < Jekyll::Plugins::Relationships::Resolvers::Base
-	from 'products, categories'
-	to 'self'
+  from 'products, categories'
+  to 'self'
 
-	# Called for each item in the collection
-	def resolve
-		# use link(reference) and unlink(reference) to modify links on this document from `from` to `to`
-	end
+  # Called for each item in the collection
+  def resolve
+    # use link(reference) and unlink(reference) to modify links on this document from `from` to `to`
+  end
 
 end
 ```
@@ -334,30 +342,30 @@ The `reference` parameter in all the above:
 
 ```ruby
 class ProjectServices < Jekyll::Plugins::Relationships::Resolvers::Base
-	from 'projects'
-	to 'services'
+  from 'projects'
+  to 'services'
 
-	# Services on this project are determined by looking at
-	# its deliverables and all of their ancestors
-	# and the services they link to
-	def resolve
-		relationships(to: 'deliverables').each do |deliverable|
-			ancestors(deliverable, min: 0).each do |ancestor|
-				relationships(ancestor, to: 'services').each do |service|
-					link(service, reference: { distance: distance(ancestor) + distance(service) })
-				end
-			end
-		end
-	end
+  # Services on this project are determined by looking at
+  # its deliverables and all of their ancestors
+  # and the services they link to
+  def resolve
+    relationships(to: 'deliverables').each do |deliverable|
+      ancestors(deliverable, min: 0).each do |ancestor|
+        relationships(ancestor, to: 'services').each do |service|
+          link(service, reference: { distance: distance(ancestor) + distance(service) })
+        end
+      end
+    end
+  end
 
-	# Helper to add distance info to added links
-	def distance(reference)
-		if reference.has_key?('distance')
-			reference['distance']
-		else
-			0
-		end
-	end
+  # Helper to add distance info to added links
+  def distance(reference)
+    if reference.has_key?('distance')
+      reference['distance']
+    else
+      0
+    end
+  end
 
 end
 ```
@@ -374,9 +382,9 @@ In many places, certain keyword strings have special meaning. In case these stri
 
 ```yaml
 keywords:
-	base: prepend
-	self: itself
-	#etc for all reserved tokens that can be used in a context where collection names or frontmatter keys can also be given
+  base: prepend
+  self: itself
+  #etc for all reserved tokens that can be used in a context where collection names or frontmatter keys can also be given
 ```
 
 
@@ -385,28 +393,28 @@ keywords:
 ```yml
 # Portfolio site
 relationships:
-	frontmatter:
-		base: ''
-		primary: meta.id
-		foreign: data.<collection>
+  frontmatter:
+    base: ''
+    primary: meta.id
+    foreign: data.<collection>
 
-	relationships:
-	# Clients have an organisation type, industry and location
-	- from: clients
-		to: org_types, industries, locations
-	# Deliverables, industries and locations can nest inside themselves
-	- from: deliverables, industries, locations
-		to: self
-		mode: parent
-	- from: deliverables
-		to: services
-	- from: projects
-		to:
-		- services
-		- collection: deliverables
-			frontmatter:
-				foreign: data.deliverables, data.body.details.deliverables
-		- collection: clients
-			frontmatter:
-				foreign: data.client
+  relationships:
+  # Clients have an organisation type, industry and location
+  - from: clients
+    to: org_types, industries, locations
+  # Deliverables, industries and locations can nest inside themselves
+  - from: deliverables, industries, locations
+    to: self
+    mode: parent
+  - from: deliverables
+    to: services
+  - from: projects
+    to:
+    - services
+    - collection: deliverables
+      frontmatter:
+        foreign: data.deliverables, data.body.details.deliverables
+    - collection: clients
+      frontmatter:
+        foreign: data.client
 ```

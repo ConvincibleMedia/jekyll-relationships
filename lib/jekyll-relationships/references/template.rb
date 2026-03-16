@@ -4,12 +4,13 @@ module Jekyll
 module Plugins
 
 module Relationships
+module References
 
 # Parses loose reference values and builds canonical relationship hashes.
 #
 # The template is configured from `relationships.references` and controls which
 # property names hold the key, collection, and page values in output hashes.
-class ReferenceTemplate
+class Template
 
 	# Represents one parsed reference before or after it is resolved.
 	#
@@ -173,6 +174,7 @@ class ReferenceTemplate
 	end
 end
 
+end
 end
 
 end
