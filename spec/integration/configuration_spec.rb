@@ -3,6 +3,30 @@
 require 'spec_helper'
 
 RSpec.describe 'relationships configuration' do
+	it 'allows relationship-level debug overrides to replace the global setting' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'debug' => true,
+				'relationships' => [
+					{ 'from' => 'products', 'to' => 'categories', 'debug' => false },
+					{ 'from' => 'products', 'to' => 'services', 'debug' => true }
+				]
+			}
+		)
+
+		categories_relationship = configuration.normal_relationship_for(
+			from_collection: 'products',
+			to_collection: 'categories'
+		)
+		services_relationship = configuration.normal_relationship_for(
+			from_collection: 'products',
+			to_collection: 'services'
+		)
+
+		expect(categories_relationship.debug?).to eq(false)
+		expect(services_relationship.debug?).to eq(true)
+	end
+
 	it 'supports overridden keywords for self relationships while collection placeholders stay literal' do
 		relationships = {
 			'keywords' => {

@@ -15,12 +15,13 @@ module Relationships
 # One engine instance handles one Jekyll build and owns the mutable runtime
 # state used while relationships are resolved recursively.
 class Engine
-	attr_reader :site, :configuration, :registry, :tree_graph, :data_path
+	attr_reader :site, :configuration, :registry, :tree_graph, :data_path, :debug_logger
 
 	# Builds one engine for one Jekyll site build.
 	def initialize(site:)
 		@site = site
 		@configuration = Configuration.new(@site.config)
+		@debug_logger = DebugLogger.new
 		@registry = Documents::Registry.new(site: @site, collections: @configuration.collections)
 		@data_path = Jekyll::Plugins::Relationships::Support::DataPath.new
 		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
@@ -28,7 +29,8 @@ class Engine
 			site: @site,
 			configuration: @configuration,
 			registry: @registry,
-			data_path: @data_path
+			data_path: @data_path,
+			debug_logger: @debug_logger
 		)
 		@write_back = WriteBack.new(engine: self)
 		@raw_path_states = {}
@@ -107,7 +109,13 @@ class Engine
 		mirror_state = relationship_state(target_document, source_state.definition.from_collection)
 		return unless mirror_state
 
-		mirror_state.link(source_state.document, metadata: metadata, count: count, reflect: false)
+		mirror_state.link(
+			source_state.document,
+			metadata: metadata,
+			count: count,
+			reflect: false,
+			origin: "mirror #{source_state.document.relative_path}"
+		)
 	end
 
 	# Mirrors one bidirectional removal into the reverse state.
@@ -115,7 +123,11 @@ class Engine
 		mirror_state = relationship_state(target_document, source_state.definition.from_collection)
 		return unless mirror_state
 
-		mirror_state.unlink(source_state.document, reflect: false)
+		mirror_state.unlink(
+			source_state.document,
+			reflect: false,
+			origin: "mirror #{source_state.document.relative_path}"
+		)
 	end
 
 	# Returns the cached relationship state for one concrete pair.

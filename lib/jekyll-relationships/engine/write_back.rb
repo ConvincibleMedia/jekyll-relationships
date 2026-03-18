@@ -47,19 +47,44 @@ class Engine
 				output_paths[output_path] ||= []
 				output_paths[output_path] << state
 				definition.foreign_paths.each do |path|
-					input_paths[path] = @engine.raw_path_state(document, path)
+					input_paths[path] ||= {
+						raw_state: @engine.raw_path_state(document, path),
+						definitions: []
+					}
+					input_paths[path][:definitions] << definition
 				end
 			end
 
 			output_paths.each do |path, states|
-				@data_path.write(document.data, path, merged_output_value(states))
+				value = merged_output_value(states)
+				@data_path.write(document.data, path, value)
+				@engine.debug_logger.document_event(
+					document: document,
+					definitions: states.map(&:definition),
+					event: 'write_output',
+					details: {
+						path: path,
+						value: value
+					}
+				)
 			end
 
-			input_paths.each do |path, raw_state|
+			input_paths.each do |path, input_path_state|
+				raw_state = input_path_state.fetch(:raw_state)
 				next if output_paths.key?(path)
 				next unless raw_state.present?
 
-				@data_path.write(document.data, path, raw_state.upgraded_value(registry: @registry))
+				value = raw_state.upgraded_value(registry: @registry)
+				@data_path.write(document.data, path, value)
+				@engine.debug_logger.document_event(
+					document: document,
+					definitions: input_path_state.fetch(:definitions),
+					event: 'upgrade_input',
+					details: {
+						path: path,
+						value: value
+					}
+				)
 			end
 		end
 

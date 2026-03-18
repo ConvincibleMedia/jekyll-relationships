@@ -37,6 +37,15 @@ class Configuration
 
 			raise ConfigurationError, "`#{context}` must be an integer."
 		end
+
+		# Converts one config value to a boolean with a helpful error.
+		def boolean_value(value, context)
+			return value if value == true || value == false
+			return true if value.is_a?(String) && value.strip.casecmp('true').zero?
+			return false if value.is_a?(String) && value.strip.casecmp('false').zero?
+
+			raise ConfigurationError, "`#{context}` must be true or false."
+		end
 	end
 end
 

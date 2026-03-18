@@ -13,9 +13,10 @@ class Configuration
 	# expansion, duplicate detection, and frontmatter override precedence.
 	class Parser
 		# Builds one parser for the current configuration.
-		def initialize(raw_config:, string_array:, global_frontmatter:, global_tree_settings:, keywords:)
+		def initialize(raw_config:, string_array:, global_debug:, global_frontmatter:, global_tree_settings:, keywords:)
 			@raw_config = raw_config
 			@string_array = string_array
+			@global_debug = global_debug
 			@global_frontmatter = global_frontmatter
 			@global_tree_settings = global_tree_settings
 			@keywords = keywords
@@ -50,12 +51,14 @@ class Configuration
 
 				relationship_frontmatter = Configuration::HashUtilities.fetch_hash_value(entry, 'frontmatter')
 				relationship_tree = Configuration::HashUtilities.fetch_hash_value(entry, 'tree')
+				relationship_debug = relationship_debug_setting(entry: entry, entry_index: entry_index)
 				relationship_mode = normalise_mode(Configuration::HashUtilities.fetch_hash_value(entry, 'mode'))
 				effective_relationship_frontmatter = @global_frontmatter.merge(relationship_frontmatter)
 				effective_relationship_tree_settings = @global_tree_settings.merge_level(
 					frontmatter_override: relationship_frontmatter,
 					tree_override: relationship_tree
 				)
+				effective_relationship_debug = relationship_debug.nil? ? @global_debug : relationship_debug
 
 				from_collections.each do |from_collection|
 					collections << from_collection
@@ -83,6 +86,7 @@ class Configuration
 									mode: effective_mode,
 									frontmatter: effective_frontmatter,
 									tree_settings: effective_tree_settings,
+									debug: effective_relationship_debug,
 									sequence: sequence
 								)
 								sequence += 1
@@ -94,6 +98,7 @@ class Configuration
 									to_collection: to_collection,
 									mode: effective_mode,
 									frontmatter: effective_frontmatter,
+									debug: effective_relationship_debug,
 									sequence: sequence
 								)
 							end
@@ -129,12 +134,13 @@ class Configuration
 		private
 
 		# Adds one concrete normal relationship pair.
-		def register_normal_relationships(normal_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, sequence:)
+		def register_normal_relationships(normal_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, debug:, sequence:)
 			ensure_unoccupied_pair!(occupancy, from_collection, to_collection, "normal relationship #{from_collection} -> #{to_collection}")
 			normal_relationships[from_collection][to_collection] = build_normal_relationship(
 				from_collection: from_collection,
 				to_collection: to_collection,
 				frontmatter: frontmatter,
+				debug: debug,
 				sequence: sequence,
 				reads_frontmatter: true,
 				bidirectional: mode == 'bidirectional'
@@ -149,6 +155,7 @@ class Configuration
 				from_collection: to_collection,
 				to_collection: from_collection,
 				frontmatter: frontmatter,
+				debug: debug,
 				sequence: sequence,
 				reads_frontmatter: false,
 				bidirectional: true
@@ -158,7 +165,7 @@ class Configuration
 		end
 
 		# Adds one concrete tree relationship definition.
-		def register_tree_relationship(tree_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, tree_settings:, sequence:)
+		def register_tree_relationship(tree_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, tree_settings:, debug:, sequence:)
 			ensure_unoccupied_pair!(occupancy, from_collection, to_collection, "tree relationship #{from_collection} <-> #{to_collection}")
 			ensure_unoccupied_pair!(occupancy, to_collection, from_collection, "tree relationship #{to_collection} <-> #{from_collection}") unless from_collection == to_collection
 
@@ -168,6 +175,7 @@ class Configuration
 				primary_path: frontmatter.primary_path,
 				parent_child_pairs: parent_child_pairs(from_collection: from_collection, to_collection: to_collection, mode: mode),
 				tree_settings: tree_settings,
+				debug: debug,
 				sequence: sequence
 			)
 
@@ -176,13 +184,14 @@ class Configuration
 		end
 
 		# Builds one normal relationship definition.
-		def build_normal_relationship(from_collection:, to_collection:, frontmatter:, sequence:, reads_frontmatter:, bidirectional:)
+		def build_normal_relationship(from_collection:, to_collection:, frontmatter:, debug:, sequence:, reads_frontmatter:, bidirectional:)
 			Definitions::NormalRelationship.new(
 				from_collection: from_collection,
 				to_collection: to_collection,
 				primary_path: frontmatter.primary_path,
 				foreign_paths: frontmatter.foreign_paths_for(to_collection: to_collection),
 				output_path: frontmatter.output_path_for(to_collection: to_collection),
+				debug: debug,
 				sequence: sequence,
 				reads_frontmatter: reads_frontmatter,
 				bidirectional: bidirectional
@@ -267,6 +276,16 @@ class Configuration
 			return string_mode if %w[link bidirectional parent child parent/child child/parent].include?(string_mode)
 
 			raise ConfigurationError, "Unsupported relationship mode `#{mode}`."
+		end
+
+		# Resolves one optional per-relationship debug override.
+		def relationship_debug_setting(entry:, entry_index:)
+			return nil unless Configuration::HashUtilities.hash_key?(entry, 'debug')
+
+			Configuration::HashUtilities.boolean_value(
+				Configuration::HashUtilities.fetch_hash_value(entry, 'debug'),
+				"relationships.relationships[#{entry_index}].debug"
+			)
 		end
 
 		# Builds the allowed parent-child collection directions for one tree mode.

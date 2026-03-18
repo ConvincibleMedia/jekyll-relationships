@@ -12,7 +12,7 @@ class Engine
 	# The state parses a document path once, then reuses its parsed entries and
 	# resolved documents across any number of relationship pairs.
 	class RawPathState
-		attr_reader :document, :path
+		attr_reader :document, :path, :raw_value
 
 		# Builds one raw-path cache for one document and path.
 		def initialize(document:, path:, data_path:, string_array:, reference_template:, multiple_settings:)

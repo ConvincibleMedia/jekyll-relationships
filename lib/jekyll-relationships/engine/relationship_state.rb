@@ -43,13 +43,23 @@ class Engine
 			raise ResolutionError, "Cyclic relationship resolution detected while resolving #{description}." if resolving?
 
 			@status = :resolving
+			debug('resolve_start', {
+				input_paths: @definition.foreign_paths,
+				output_path: @definition.final_output_path,
+				reads_frontmatter: @definition.reads_frontmatter,
+				bidirectional: @definition.bidirectional,
+				resolvers: @definition.resolver_classes.map { |resolver_class| @engine.debug_logger.resolver_name(resolver_class) }
+			})
 			seed_raw_links!
 			run_resolvers!
 			@status = :resolved
+			debug('resolve_finish', {
+				references: current_references
+			})
 		end
 
 		# Adds one link to the state and mirrors it when required.
-		def link(reference, metadata: nil, count: 1, reflect: true)
+		def link(reference, metadata: nil, count: 1, reflect: true, origin: 'resolver')
 			target_document = @engine.resolve_reference_document(
 				reference,
 				primary_path: @definition.primary_path,
@@ -59,23 +69,38 @@ class Engine
 				raise ResolutionError, "Resolver attempted to link `#{target_document.relative_path}` outside the allowed target collection `#{@definition.to_collection}`."
 			end
 
-			changed = @links.add(
+			action = @links.add_result(
 				document: target_document,
 				key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
 				metadata: sanitised_metadata(metadata),
 				count: count
 			)
-			return unless changed
+			debug('link', {
+				action: action,
+				origin: origin,
+				target: target_document,
+				target_key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
+				count: count,
+				metadata: sanitised_metadata(metadata)
+			})
+			return if action == :ignored
 			return unless reflect && @definition.bidirectional
 
 			@engine.mirror_add(source_state: self, target_document: target_document, metadata: metadata, count: count)
 		end
 
 		# Removes one link, or every link when no reference is given.
-		def unlink(reference = nil, reflect: true)
+		def unlink(reference = nil, reflect: true, origin: 'resolver')
 			if reference.nil?
+				if current_link_entries.empty?
+					debug('unlink_all', {
+						action: :missing,
+						origin: origin
+					})
+				end
+
 				current_link_entries.each do |entry|
-					remove_document(document: entry.fetch(:document), reflect: reflect)
+					remove_document(document: entry.fetch(:document), reflect: reflect, origin: origin)
 				end
 				return
 			end
@@ -85,7 +110,7 @@ class Engine
 				primary_path: @definition.primary_path,
 				collection_hint: @definition.to_collection
 			)
-			remove_document(document: target_document, reflect: reflect)
+			remove_document(document: target_document, reflect: reflect, origin: origin)
 		end
 
 		# Returns the current resolved reference hashes after final sorting.
@@ -107,17 +132,38 @@ class Engine
 
 			@definition.foreign_paths.each do |path|
 				raw_state = @engine.raw_path_state(@document, path)
+				debug('raw_path', {
+					path: path,
+					present: raw_state.present?,
+					value: raw_state.raw_value
+				})
 				next unless raw_state.present?
 
-				raw_state.resolved_entries_for(primary_path: @definition.primary_path, registry: @engine.registry).each do |entry|
+				resolved_entries = raw_state.resolved_entries_for(primary_path: @definition.primary_path, registry: @engine.registry)
+				debug('raw_path_resolved', {
+					path: path,
+					entries: resolved_entries.compact
+				})
+
+				resolved_entries.each do |entry|
 					next unless entry
-					next unless entry.fetch(:document).collection.label == @definition.to_collection
+					if entry.fetch(:document).collection.label != @definition.to_collection
+						debug('raw_path_skipped', {
+							path: path,
+							target: entry.fetch(:document),
+							target_key: entry.fetch(:key),
+							actual_collection: entry.fetch(:document).collection.label,
+							expected_collection: @definition.to_collection
+						})
+						next
+					end
 
 					link(
 						entry.fetch(:document),
 						metadata: entry.fetch(:metadata),
 						count: entry.fetch(:count),
-						reflect: @definition.bidirectional
+						reflect: @definition.bidirectional,
+						origin: "frontmatter #{path}"
 					)
 				end
 			end
@@ -128,14 +174,27 @@ class Engine
 		# Instantiates and runs every configured resolver class.
 		def run_resolvers!
 			@definition.resolver_classes.each do |resolver_class|
+				debug('resolver_start', {
+					resolver: @engine.debug_logger.resolver_name(resolver_class)
+				})
 				resolver_class.new(engine: @engine, state: self).resolve
+				debug('resolver_finish', {
+					resolver: @engine.debug_logger.resolver_name(resolver_class),
+					references: current_references
+				})
 			end
 		end
 
 		# Removes one stored document and mirrors the removal if needed.
-		def remove_document(document:, reflect:)
-			removed = @links.remove(document: document)
-			return unless removed
+		def remove_document(document:, reflect:, origin:)
+			action = @links.remove_result(document: document)
+			debug('unlink', {
+				action: action,
+				origin: origin,
+				target: document,
+				target_key: @engine.registry.key_for(document, primary_path: @definition.primary_path)
+			})
+			return unless action == :removed
 			return unless reflect && @definition.bidirectional
 
 			@engine.mirror_remove(source_state: self, target_document: document)
@@ -156,6 +215,16 @@ class Engine
 		# Builds a readable state label for cycle errors.
 		def description
 			"`#{@document.relative_path}` (#{@definition.from_collection} -> #{@definition.to_collection})"
+		end
+
+		# Emits one debug event for this state when the definition enables it.
+		def debug(event, details)
+			@engine.debug_logger.relationship_event(
+				document: @document,
+				definition: @definition,
+				event: event,
+				details: details
+			)
 		end
 	end
 end

@@ -25,21 +25,26 @@ class Accumulator
 
 	# Adds one resolved relationship entry.
 	def add(document:, key:, metadata: nil, count: 1)
+		add_result(document: document, key: key, metadata: metadata, count: count) != :ignored
+	end
+
+	# Adds one resolved relationship entry and returns how it changed the set.
+	def add_result(document:, key:, metadata: nil, count: 1)
 		if @multiple_settings.keep?
 			append_entry(document: document, key: key, metadata: metadata, count: 1)
-			return true
+			return :added
 		end
 
 		existing_entry = @entries_by_document_id[document.object_id]
 		if existing_entry
-			return false if @multiple_settings.drop?
+			return :ignored if @multiple_settings.drop?
 
 			existing_entry[:count] += normalise_count(count)
 			existing_entry[:metadata] = merge_metadata_under(
 				existing_metadata: existing_entry[:metadata],
 				incoming_metadata: metadata
 			)
-			return true
+			return :merged
 		end
 
 		entry = append_entry(
@@ -49,21 +54,26 @@ class Accumulator
 			count: counted_mode? ? normalise_count(count) : 1
 		)
 		@entries_by_document_id[document.object_id] = entry
-		true
+		:added
 	end
 
 	# Removes every stored occurrence of one target document.
 	def remove(document:)
+		remove_result(document: document) == :removed
+	end
+
+	# Removes every stored occurrence of one target document and reports the outcome.
+	def remove_result(document:)
 		if @multiple_settings.keep?
 			removed_entries = @entries.reject! { |entry| entry.fetch(:document) == document }
-			return !removed_entries.nil?
+			return removed_entries.nil? ? :missing : :removed
 		end
 
 		entry = @entries_by_document_id.delete(document.object_id)
-		return false unless entry
+		return :missing unless entry
 
 		@entries.delete(entry)
-		true
+		:removed
 	end
 
 	# Returns the accumulated entries in encounter order.

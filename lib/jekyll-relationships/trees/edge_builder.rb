@@ -12,11 +12,12 @@ module Trees
 # can focus on storing edges and answering ancestry queries.
 class EdgeBuilder
 	# Builds one edge builder for the current graph.
-	def initialize(graph:, configuration:, registry:, data_path:)
+	def initialize(graph:, configuration:, registry:, data_path:, debug_logger:)
 		@graph = graph
 		@configuration = configuration
 		@registry = registry
 		@data_path = data_path
+		@debug_logger = debug_logger
 		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 	end
 
@@ -57,10 +58,23 @@ class EdgeBuilder
 					next unless parent_document
 					next unless parent_document.collection.label == parent_collection
 
+					@debug_logger.tree_event(
+						document: child_document,
+						definition: definition,
+						event: 'tree_reference_resolved',
+						details: {
+							source: "frontmatter #{path}",
+							reference: reference.metadata.merge('key' => reference.key, 'collection' => reference.collection),
+							target: parent_document
+						}
+					)
+
 					@graph.add_edge(
 						parent_document: parent_document,
 						child_document: child_document,
-						tree_settings: definition.tree_settings
+						tree_settings: definition.tree_settings,
+						definition: definition,
+						source_description: "frontmatter #{path}"
 					)
 				end
 			end
@@ -78,10 +92,23 @@ class EdgeBuilder
 					next unless child_document
 					next unless child_document.collection.label == child_collection
 
+					@debug_logger.tree_event(
+						document: parent_document,
+						definition: definition,
+						event: 'tree_reference_resolved',
+						details: {
+							source: "frontmatter #{path}",
+							reference: reference.metadata.merge('key' => reference.key, 'collection' => reference.collection),
+							target: child_document
+						}
+					)
+
 					@graph.add_edge(
 						parent_document: parent_document,
 						child_document: child_document,
-						tree_settings: definition.tree_settings
+						tree_settings: definition.tree_settings,
+						definition: definition,
+						source_description: "frontmatter #{path}"
 					)
 				end
 			end
@@ -107,7 +134,9 @@ class EdgeBuilder
 						@graph.add_edge(
 							parent_document: parent_document,
 							child_document: child_document,
-							tree_settings: definition.tree_settings
+							tree_settings: definition.tree_settings,
+							definition: definition,
+							source_description: 'url'
 						)
 					end
 				end

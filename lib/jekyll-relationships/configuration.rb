@@ -20,12 +20,13 @@ module Relationships
 # The object resolves defaults once, exposes the final keyword and frontmatter
 # rules, and indexes the concrete relationship definitions used by the engine.
 class Configuration
-	attr_reader :keywords, :multiple_settings, :reference_template, :tree_settings, :global_frontmatter
+	attr_reader :keywords, :multiple_settings, :reference_template, :tree_settings, :global_frontmatter, :debug
 
 	# Builds the full configuration model from `site.config`.
 	def initialize(site_config)
 		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 		@raw_config = Configuration::HashUtilities.fetch_hash_value(site_config, 'relationships') || {}
+		@debug = build_debug_setting
 		global_frontmatter_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'frontmatter')
 		global_tree_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'tree')
 		@keywords = build_keywords(Configuration::HashUtilities.fetch_hash_value(@raw_config, 'keywords'))
@@ -53,6 +54,7 @@ class Configuration
 		parsed_relationships = Parser.new(
 			raw_config: @raw_config,
 			string_array: @string_array,
+			global_debug: @debug,
 			global_frontmatter: @global_frontmatter,
 			global_tree_settings: @tree_settings,
 			keywords: @keywords
@@ -100,6 +102,16 @@ class Configuration
 	# Builds the active keyword table.
 	def build_keywords(raw_keywords)
 		Configuration::HashUtilities.merge_hash(Defaults::KEYWORDS, raw_keywords)
+	end
+
+	# Builds the active global debug setting.
+	def build_debug_setting
+		return Defaults::DEBUG unless Configuration::HashUtilities.hash_key?(@raw_config, 'debug')
+
+		Configuration::HashUtilities.boolean_value(
+			Configuration::HashUtilities.fetch_hash_value(@raw_config, 'debug'),
+			'relationships.debug'
+		)
 	end
 
 	# Builds the resolved reference template config.

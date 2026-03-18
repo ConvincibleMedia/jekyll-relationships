@@ -14,11 +14,12 @@ module Trees
 # once normal relationship resolvers begin running.
 class Graph
 	# Builds one tree graph helper with the collaborators it needs.
-	def initialize(site:, configuration:, registry:, data_path:)
+	def initialize(site:, configuration:, registry:, data_path:, debug_logger:)
 		@site = site
 		@configuration = configuration
 		@registry = registry
 		@data_path = data_path
+		@debug_logger = debug_logger
 		@parents = Hash.new { |hash, key| hash[key] = [] }
 		@children = Hash.new { |hash, key| hash[key] = [] }
 		@ancestor_cache = {}
@@ -34,7 +35,8 @@ class Graph
 			graph: self,
 			configuration: @configuration,
 			registry: @registry,
-			data_path: @data_path
+			data_path: @data_path,
+			debug_logger: @debug_logger
 		)
 	end
 
@@ -83,32 +85,86 @@ class Graph
 	end
 
 	# Adds one parent-child edge unless it would break tree guarantees.
-	def add_edge(parent_document:, child_document:, tree_settings:)
+	def add_edge(parent_document:, child_document:, tree_settings:, definition:, source_description:)
 		return if edge_exists?(parent_document: parent_document, child_document: child_document)
 
 		if parent_document == child_document
 			warn("Ignoring self-referential tree edge on `#{child_document.relative_path}`.")
+			debug_tree_event(
+				document: child_document,
+				definition: definition,
+				event: 'tree_edge_ignored',
+				details: {
+					reason: 'self_referential',
+					source: source_description,
+					parent: parent_document,
+					child: child_document
+				}
+			)
 			return
 		end
 
 		if maximum_reached?(maximum: tree_settings.max_parents, items: @parents[child_document])
 			warn("Ignoring extra parent for `#{child_document.relative_path}` because the configured parent maximum has been reached.")
+			debug_tree_event(
+				document: child_document,
+				definition: definition,
+				event: 'tree_edge_ignored',
+				details: {
+					reason: 'max_parents_reached',
+					source: source_description,
+					parent: parent_document,
+					child: child_document
+				}
+			)
 			return
 		end
 
 		if maximum_reached?(maximum: tree_settings.max_children, items: @children[parent_document])
 			warn("Ignoring extra child for `#{parent_document.relative_path}` because the configured child maximum has been reached.")
+			debug_tree_event(
+				document: parent_document,
+				definition: definition,
+				event: 'tree_edge_ignored',
+				details: {
+					reason: 'max_children_reached',
+					source: source_description,
+					parent: parent_document,
+					child: child_document
+				}
+			)
 			return
 		end
 
 		if reachable?(from_document: child_document, to_document: parent_document)
 			warn("Ignoring tree edge from `#{parent_document.relative_path}` to `#{child_document.relative_path}` because it would create a loop.")
+			debug_tree_event(
+				document: child_document,
+				definition: definition,
+				event: 'tree_edge_ignored',
+				details: {
+					reason: 'loop_detected',
+					source: source_description,
+					parent: parent_document,
+					child: child_document
+				}
+			)
 			return
 		end
 
 		@parents[child_document] << parent_document
 		@children[parent_document] << child_document
 		clear_distance_cache
+		debug_tree_event(
+			document: child_document,
+			definition: definition,
+			event: 'tree_edge_added',
+			details: {
+				source: source_description,
+				parent: parent_document,
+				child: child_document
+			}
+		)
 	end
 
 	# Writes the final tree output back into document frontmatter.
@@ -150,6 +206,15 @@ class Graph
 						max_children: definition.tree_settings.max_children
 					)
 				)
+				debug_tree_event(
+					document: document,
+					definition: definition,
+					event: 'tree_write_output',
+					details: {
+						path: frontmatter.output_path,
+						value: @data_path.read(document.data, frontmatter.output_path)
+					}
+				)
 				next
 			end
 
@@ -169,6 +234,21 @@ class Graph
 			)
 			@data_path.write(document.data, frontmatter.ancestors_output_path, ancestor_values)
 			@data_path.write(document.data, frontmatter.descendants_output_path, descendant_values)
+			debug_tree_event(
+				document: document,
+				definition: definition,
+				event: 'tree_write_output',
+				details: {
+					parent_path: definition.tree_settings.max_parents == 1 ? frontmatter.parent_output_path : frontmatter.parents_output_path,
+					parent_value: definition.tree_settings.max_parents == 1 ? parent_values.first : parent_values,
+					child_path: definition.tree_settings.max_children == 1 ? frontmatter.child_output_path : frontmatter.children_output_path,
+					child_value: definition.tree_settings.max_children == 1 ? child_values.first : child_values,
+					ancestors_path: frontmatter.ancestors_output_path,
+					ancestors_value: ancestor_values,
+					descendants_path: frontmatter.descendants_output_path,
+					descendants_value: descendant_values
+				}
+			)
 		end
 	end
 
@@ -277,6 +357,16 @@ class Graph
 	# Emits one Jekyll warning line for recoverable tree issues.
 	def warn(message)
 		Jekyll.logger.warn('Relationships:', message)
+	end
+
+	# Emits one debug line for tree processing when this definition opts in.
+	def debug_tree_event(document:, definition:, event:, details:)
+		@debug_logger.tree_event(
+			document: document,
+			definition: definition,
+			event: event,
+			details: details
+		)
 	end
 end
 

@@ -9,6 +9,8 @@ class Configuration
 
 	# Holds the built-in configuration defaults used when the site omits them.
 	module Defaults
+		DEBUG = false
+
 		FRONTMATTER = {
 			'base' => 'relationships',
 			'primary' => nil,

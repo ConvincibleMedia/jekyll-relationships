@@ -15,18 +15,24 @@ class TreeRelationship
 	attr_reader :from_collection, :to_collection, :primary_path, :tree_settings, :sequence
 
 	# Captures the allowed parent-child directions for one tree definition.
-	def initialize(from_collection:, to_collection:, primary_path:, parent_child_pairs:, tree_settings:, sequence:)
+	def initialize(from_collection:, to_collection:, primary_path:, parent_child_pairs:, tree_settings:, debug:, sequence:)
 		@from_collection = from_collection
 		@to_collection = to_collection
 		@primary_path = primary_path
 		@parent_child_pairs = parent_child_pairs
 		@tree_settings = tree_settings
+		@debug = debug
 		@sequence = sequence
 	end
 
 	# Returns every allowed parent-child direction for this definition.
 	def parent_child_pairs
 		@parent_child_pairs.dup
+	end
+
+	# Returns true when extra debug logging should be emitted for this definition.
+	def debug?
+		@debug
 	end
 
 	# Returns true when one parent-child direction is permitted.

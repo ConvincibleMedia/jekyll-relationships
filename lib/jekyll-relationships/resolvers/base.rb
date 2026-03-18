@@ -82,26 +82,55 @@ class Base
 	def relationships(reference = nil, to: nil, from: nil)
 		target_collection = to || @to
 		document = resolve_helper_document(reference, from)
-		if document == @document && target_collection == @to && @state.resolving?
-			return @state.current_references
-		end
-
-		@engine.resolve_relationships(document, target_collection)
+		result = if document == @document && target_collection == @to && @state.resolving?
+						 @state.current_references
+					 else
+						 @engine.resolve_relationships(document, target_collection)
+					 end
+		debug_helper('resolver_relationships', {
+			reference: reference,
+			from: from,
+			target_document: document,
+			to: target_collection,
+			result: result
+		})
+		result
 	end
 
 	# Returns the referenced document, resolving its outgoing pairs if needed.
 	def document(reference = nil, from: nil)
 		document = resolve_helper_document(reference, from)
-		return document if document == @document
+		if document == @document
+			debug_helper('resolver_document', {
+				reference: reference,
+				from: from,
+				target_document: document
+			})
+			return document
+		end
 
 		@engine.resolve_document(document)
+		debug_helper('resolver_document', {
+			reference: reference,
+			from: from,
+			target_document: document
+		})
 		document
 	end
 
 	# Returns ancestors for one document reference.
 	def ancestors(reference = nil, from: nil, min: 1, max: -1)
 		document = resolve_helper_document(reference, from)
-		@engine.tree_graph.ancestors_for(document, min: min, max: max)
+		result = @engine.tree_graph.ancestors_for(document, min: min, max: max)
+		debug_helper('resolver_ancestors', {
+			reference: reference,
+			from: from,
+			target_document: document,
+			min: min,
+			max: max,
+			result: result
+		})
+		result
 	end
 
 	# Returns parents for one document reference.
@@ -112,7 +141,16 @@ class Base
 	# Returns descendants for one document reference.
 	def descendants(reference = nil, from: nil, min: 1, max: -1)
 		document = resolve_helper_document(reference, from)
-		@engine.tree_graph.descendants_for(document, min: min, max: max)
+		result = @engine.tree_graph.descendants_for(document, min: min, max: max)
+		debug_helper('resolver_descendants', {
+			reference: reference,
+			from: from,
+			target_document: document,
+			min: min,
+			max: max,
+			result: result
+		})
+		result
 	end
 
 	# Returns children for one document reference.
@@ -122,12 +160,19 @@ class Base
 
 	# Adds one relationship from the current document to the target collection.
 	def link(target_reference, reference: nil)
-		@state.link(target_reference, metadata: reference)
+		@state.link(
+			target_reference,
+			metadata: reference,
+			origin: "resolver #{self.class.name || self.class}"
+		)
 	end
 
 	# Removes one relationship, or all of them when no reference is given.
 	def unlink(reference = nil)
-		@state.unlink(reference)
+		@state.unlink(
+			reference,
+			origin: "resolver #{self.class.name || self.class}"
+		)
 	end
 
 	private
@@ -140,6 +185,16 @@ class Base
 			reference,
 			primary_path: @state.definition.primary_path,
 			collection_hint: from_collection
+		)
+	end
+
+	# Emits one debug line for one resolver helper call when enabled.
+	def debug_helper(event, details)
+		@engine.debug_logger.relationship_event(
+			document: @document,
+			definition: @state.definition,
+			event: event,
+			details: details
 		)
 	end
 end
