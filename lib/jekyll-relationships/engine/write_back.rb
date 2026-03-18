@@ -65,16 +65,22 @@ class Engine
 
 		# Merges one or more pair states into one final output array.
 		def merged_output_value(states)
-			seen_documents = Set.new
-			states.sort_by { |state| state.definition.sequence }.each_with_object([]) do |state, merged|
-				state.current_link_payloads.each do |payload|
-					document_id = payload.fetch(:document).object_id
-					next if seen_documents.include?(document_id)
-
-					seen_documents << document_id
-					merged << payload.fetch(:reference)
+			accumulator = Jekyll::Plugins::Relationships::References::Accumulator.new(
+				reference_template: @configuration.reference_template,
+				multiple_settings: @configuration.multiple_settings
+			)
+			states.sort_by { |state| state.definition.sequence }.each do |state|
+				state.current_link_entries.each do |entry|
+					accumulator.add(
+						document: entry.fetch(:document),
+						key: entry.fetch(:key),
+						metadata: entry.fetch(:metadata),
+						count: entry.fetch(:count)
+					)
 				end
 			end
+
+			accumulator.references
 		end
 	end
 end

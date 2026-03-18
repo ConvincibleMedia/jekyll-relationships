@@ -15,12 +15,13 @@ class Engine
 		attr_reader :document, :path
 
 		# Builds one raw-path cache for one document and path.
-		def initialize(document:, path:, data_path:, string_array:, reference_template:)
+		def initialize(document:, path:, data_path:, string_array:, reference_template:, multiple_settings:)
 			@document = document
 			@path = path
 			@data_path = data_path
 			@string_array = string_array
 			@reference_template = reference_template
+			@multiple_settings = multiple_settings
 			@raw_value = @data_path.read(@document.data, @path)
 			@present = !@raw_value.nil?
 			@shape = infer_shape(@raw_value)
@@ -49,20 +50,19 @@ class Engine
 
 			signature = primary_signature(@preferred_primary_path)
 			resolved_entries = @resolution_cache[signature] || []
-			values = []
-			seen_documents = Set.new
+			accumulator = build_accumulator
 
-			@entries.each_with_index do |entry, index|
-				resolved_entry = resolved_entries[index]
-				if resolved_entry
-					next if seen_documents.include?(resolved_entry.fetch(:document).object_id)
+			resolved_entries.each do |resolved_entry|
+				next unless resolved_entry
 
-					seen_documents << resolved_entry.fetch(:document).object_id
-					values << build_reference_hash(resolved_entry)
-				else
-					values << entry.original_value
-				end
+				accumulator.add(
+					document: resolved_entry.fetch(:document),
+					key: resolved_entry.fetch(:key),
+					metadata: resolved_entry.fetch(:metadata),
+					count: resolved_entry.fetch(:count)
+				)
 			end
+			values = accumulator.references
 
 			return values if @shape == :array || values.length != 1
 
@@ -93,16 +93,16 @@ class Engine
 			{
 				document: document,
 				key: registry.key_for(document, primary_path: primary_path),
-				metadata: entry.metadata
+				metadata: entry.metadata,
+				count: entry.count
 			}
 		end
 
-		# Builds one output reference hash from a resolved entry.
-		def build_reference_hash(resolved_entry)
-			@reference_template.build(
-				document: resolved_entry.fetch(:document),
-				key: resolved_entry.fetch(:key),
-				metadata: resolved_entry.fetch(:metadata)
+		# Builds one new accumulator with the active duplicate-handling settings.
+		def build_accumulator
+			Jekyll::Plugins::Relationships::References::Accumulator.new(
+				reference_template: @reference_template,
+				multiple_settings: @multiple_settings
 			)
 		end
 

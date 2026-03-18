@@ -21,8 +21,10 @@ class Engine
 			@definition = definition
 			@status = :unseen
 			@raw_seeded = false
-			@links_by_document_id = {}
-			@link_order = []
+			@links = Jekyll::Plugins::Relationships::References::Accumulator.new(
+				reference_template: @engine.configuration.reference_template,
+				multiple_settings: @engine.configuration.multiple_settings
+			)
 		end
 
 		# Returns true while the state is actively being resolved.
@@ -47,7 +49,7 @@ class Engine
 		end
 
 		# Adds one link to the state and mirrors it when required.
-		def link(reference, metadata: nil, reflect: true)
+		def link(reference, metadata: nil, count: 1, reflect: true)
 			target_document = @engine.resolve_reference_document(
 				reference,
 				primary_path: @definition.primary_path,
@@ -57,25 +59,23 @@ class Engine
 				raise ResolutionError, "Resolver attempted to link `#{target_document.relative_path}` outside the allowed target collection `#{@definition.to_collection}`."
 			end
 
-			document_id = target_document.object_id
-			return if @links_by_document_id.key?(document_id)
-
-			@links_by_document_id[document_id] = {
+			changed = @links.add(
 				document: target_document,
-				metadata: sanitised_metadata(metadata)
-			}
-			@link_order << document_id
-
+				key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
+				metadata: sanitised_metadata(metadata),
+				count: count
+			)
+			return unless changed
 			return unless reflect && @definition.bidirectional
 
-			@engine.mirror_add(source_state: self, target_document: target_document, metadata: metadata)
+			@engine.mirror_add(source_state: self, target_document: target_document, metadata: metadata, count: count)
 		end
 
 		# Removes one link, or every link when no reference is given.
 		def unlink(reference = nil, reflect: true)
 			if reference.nil?
-				@link_order.dup.each do |document_id|
-					remove_document_id(document_id: document_id, reflect: reflect)
+				current_link_entries.each do |entry|
+					remove_document(document: entry.fetch(:document), reflect: reflect)
 				end
 				return
 			end
@@ -85,30 +85,17 @@ class Engine
 				primary_path: @definition.primary_path,
 				collection_hint: @definition.to_collection
 			)
-			remove_document_id(document_id: target_document.object_id, reflect: reflect)
+			remove_document(document: target_document, reflect: reflect)
 		end
 
-		# Returns the current resolved reference hashes.
+		# Returns the current resolved reference hashes after final sorting.
 		def current_references
-			current_link_payloads.map { |payload| payload.fetch(:reference) }
+			@links.references
 		end
 
-		# Returns the current link payloads including their target documents.
-		def current_link_payloads
-			@link_order.each_with_object([]) do |document_id, payloads|
-				entry = @links_by_document_id[document_id]
-				next unless entry
-
-				target_document = entry.fetch(:document)
-				payloads << {
-					document: target_document,
-					reference: @engine.configuration.reference_template.build(
-						document: target_document,
-						key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
-						metadata: entry.fetch(:metadata)
-					)
-				}
-			end
+		# Returns the current accumulated link entries in encounter order.
+		def current_link_entries
+			@links.encounter_entries
 		end
 
 		private
@@ -126,7 +113,12 @@ class Engine
 					next unless entry
 					next unless entry.fetch(:document).collection.label == @definition.to_collection
 
-					link(entry.fetch(:document), metadata: entry.fetch(:metadata), reflect: @definition.bidirectional)
+					link(
+						entry.fetch(:document),
+						metadata: entry.fetch(:metadata),
+						count: entry.fetch(:count),
+						reflect: @definition.bidirectional
+					)
 				end
 			end
 
@@ -140,15 +132,13 @@ class Engine
 			end
 		end
 
-		# Removes one stored document id and mirrors the removal if needed.
-		def remove_document_id(document_id:, reflect:)
-			entry = @links_by_document_id.delete(document_id)
-			return unless entry
-
-			@link_order.delete(document_id)
+		# Removes one stored document and mirrors the removal if needed.
+		def remove_document(document:, reflect:)
+			removed = @links.remove(document: document)
+			return unless removed
 			return unless reflect && @definition.bidirectional
 
-			@engine.mirror_remove(source_state: self, target_document: entry.fetch(:document))
+			@engine.mirror_remove(source_state: self, target_document: document)
 		end
 
 		# Removes engine-reserved properties from resolver metadata.

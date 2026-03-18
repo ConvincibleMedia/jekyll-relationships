@@ -3,7 +3,7 @@
 require 'spec_helper'
 
 RSpec.describe 'relationship resolvers' do
-	it 'adds links idempotently when the same target is linked more than once' do
+	it 'counts repeated resolver links when the same target is linked more than once' do
 		define_resolver('IdempotentAdder', from: 'projects', to: 'services') do
 			def resolve
 				link('services/design')
@@ -24,7 +24,72 @@ RSpec.describe 'relationship resolvers' do
 
 		build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) do |site, _files|
 			project = document_for(site, 'projects', 'alpha')
-			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq(['services/design'])
+			references = project.data.fetch('relationships').fetch('services')
+
+			expect(reference_ids(references)).to eq(['services/design'])
+			expect(reference_values(references, 'count')).to eq([2])
+		end
+	end
+
+	it 'drops repeated resolver links in drop mode' do
+		define_resolver('DroppedDuplicateAdder', from: 'projects', to: 'services') do
+			def resolve
+				link('services/design')
+				link('services/design')
+			end
+		end
+
+		relationships = {
+			'multiple' => 'drop',
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha'),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			references = project.data.fetch('relationships').fetch('services')
+
+			expect(reference_ids(references)).to eq(['services/design'])
+			expect(references).to all(satisfy { |reference| !reference.key?('count') })
+		end
+	end
+
+	it 'keeps repeated resolver links in keep mode and unlinks all occurrences together' do
+		define_resolver('KeepModeCycle', from: 'projects', to: 'services') do
+			def resolve
+				link('services/design')
+				link('services/design')
+				unlink('services/design')
+				link('services/build')
+				link('services/build')
+			end
+		end
+
+		relationships = {
+			'multiple' => 'keep',
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha'),
+			collection_document('services', 'design'),
+			collection_document('services', 'build')
+		)
+
+		build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			references = project.data.fetch('relationships').fetch('services')
+
+			expect(reference_ids(references)).to eq(['services/build', 'services/build'])
+			expect(references).to all(satisfy { |reference| !reference.key?('count') })
 		end
 	end
 
@@ -146,6 +211,30 @@ RSpec.describe 'relationship resolvers' do
 		end
 	end
 
+	it 'raises when a resolver requests relationships that are not defined for the current collection' do
+		define_resolver('UndefinedRelationshipReader', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients')
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha'),
+			collection_document('services', 'design'),
+			collection_document('clients', 'acme')
+		)
+
+		expect do
+			build_relationship_site(collections: %w[projects services clients], relationships: relationships, files: files) { |_site, _files| nil }
+		end.to raise_error(JekyllTestHarness::SiteBuildError, /no relationship is defined from collection `projects` to `clients`/i)
+	end
+
 	it 'can recurse into linked items and resolve their normal relationships first' do
 		define_resolver('ProjectInheritedServices', from: 'projects', to: 'services') do
 			def resolve
@@ -183,6 +272,61 @@ RSpec.describe 'relationship resolvers' do
 		build_relationship_site(collections: %w[clients projects services], relationships: relationships, files: files) do |site, _files|
 			project = document_for(site, 'projects', 'alpha')
 			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq(['services/design'])
+		end
+	end
+
+	it 'returns foreign relationships after the final count sorting pass' do
+		define_resolver('ProjectServicesFromClients', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service)
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'multiple' => {
+				'mode' => 'count',
+				'sort' => 'desc'
+			},
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'services' => [
+						'services/design',
+						'services/build',
+						'services/design',
+						'services/research',
+						'services/design',
+						'services/build'
+					]
+				}
+			}),
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('services', 'design'),
+			collection_document('services', 'build'),
+			collection_document('services', 'research')
+		)
+
+		build_relationship_site(collections: %w[clients projects services], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			references = project.data.fetch('relationships').fetch('services')
+
+			expect(reference_ids(references)).to eq(['services/design', 'services/build', 'services/research'])
+			expect(reference_values(references, 'count')).to eq([1, 1, 1])
 		end
 	end
 

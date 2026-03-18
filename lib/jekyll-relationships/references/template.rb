@@ -9,7 +9,8 @@ module References
 # Parses loose reference values and builds canonical relationship hashes.
 #
 # The template is configured from `relationships.references` and controls which
-# property names hold the key, collection, and page values in output hashes.
+# property names hold the key, collection, page, and optional count values in
+# output hashes.
 class Template
 
 	# Represents one parsed reference before or after it is resolved.
@@ -17,13 +18,14 @@ class Template
 	# The `metadata` hash contains any non-reserved properties found on an
 	# existing reference hash.
 	class ParsedReference
-		attr_reader :key, :collection, :page, :metadata, :original_value
+		attr_reader :key, :collection, :page, :count, :metadata, :original_value
 
 		# Captures the parsed reference fields in one immutable object.
-		def initialize(key:, collection:, page:, metadata:, original_value:)
+		def initialize(key:, collection:, page:, count:, metadata:, original_value:)
 			@key = key
 			@collection = collection
 			@page = page
+			@count = count
 			@metadata = metadata
 			@original_value = original_value
 		end
@@ -34,15 +36,16 @@ class Template
 		end
 	end
 
-	attr_reader :key_property, :collection_property, :page_property
+	attr_reader :key_property, :collection_property, :page_property, :count_property
 
-	# Builds the reference template from config and active keyword names.
-	def initialize(config:, keywords:)
+	# Builds the reference template from config and duplicate-handling settings.
+	def initialize(config:, count_enabled:)
 		@config = stringify_hash(config || {})
-		@keywords = stringify_hash(keywords || {})
+		@count_enabled = !!count_enabled
 		@key_property = nil
 		@collection_property = nil
 		@page_property = nil
+		@count_property = nil
 
 		parse_config!
 	end
@@ -58,6 +61,7 @@ class Template
 				key: key,
 				collection: nil,
 				page: nil,
+				count: 1,
 				metadata: {},
 				original_value: value
 			)
@@ -68,6 +72,7 @@ class Template
 				key: nil,
 				collection: nil,
 				page: value,
+				count: 1,
 				metadata: {},
 				original_value: value
 			)
@@ -77,11 +82,12 @@ class Template
 	end
 
 	# Builds one output reference hash for a resolved document.
-	def build(document:, key:, metadata: nil)
+	def build(document:, key:, metadata: nil, count: 1, include_count: @count_enabled)
 		hash = {}
 		hash[@key_property] = key
 		hash[@collection_property] = document.collection.label if @collection_property
 		hash[@page_property] = document if @page_property
+		hash[@count_property] = normalise_count(count) if include_count && @count_property
 
 		filter_metadata(metadata).each do |property, value|
 			hash[property] = value
@@ -92,7 +98,7 @@ class Template
 
 	# Returns the configured property names that are reserved for the engine.
 	def reserved_properties
-		[@key_property, @collection_property, @page_property].compact
+		[@key_property, @collection_property, @page_property, @count_property].compact
 	end
 
 	private
@@ -101,21 +107,27 @@ class Template
 	def parse_config!
 		@config.each do |property, value|
 			case value.to_s
-			when placeholder('key')
+			when Jekyll::Plugins::Relationships::Support::Placeholders::KEY
 				raise ConfigurationError, 'Reference config can only define one <key> property.' if @key_property
 				@key_property = property
-			when placeholder('collection')
+			when Jekyll::Plugins::Relationships::Support::Placeholders::COLLECTION
 				raise ConfigurationError, 'Reference config can only define one <collection> property.' if @collection_property
 				@collection_property = property
-			when placeholder('page')
+			when Jekyll::Plugins::Relationships::Support::Placeholders::PAGE
 				raise ConfigurationError, 'Reference config can only define one <page> property.' if @page_property
 				@page_property = property
+			when Jekyll::Plugins::Relationships::Support::Placeholders::COUNT
+				raise ConfigurationError, 'Reference config can only define one <count> property.' if @count_property
+				@count_property = property
 			else
 				raise ConfigurationError, "Unsupported reference template value `#{value.inspect}`. Only placeholder keywords are supported."
 			end
 		end
 
 		raise ConfigurationError, 'Reference config must define exactly one <key> property.' unless @key_property
+		if @count_enabled && @count_property.nil?
+			raise ConfigurationError, 'Reference config must define exactly one <count> property when `relationships.multiple` is `count`.'
+		end
 	end
 
 	# Parses one hash reference according to the configured property names.
@@ -132,9 +144,21 @@ class Template
 			key: key,
 			collection: collection,
 			page: page,
+			count: parsed_count(hash),
 			metadata: filter_metadata(hash),
 			original_value: hash
 		)
+	end
+
+	# Returns the parsed count value for one reference hash.
+	def parsed_count(hash)
+		return 1 unless @count_enabled
+		return 1 unless @count_property
+
+		raw_count = fetch_hash_value(hash, @count_property)
+		return 1 if raw_count.nil?
+
+		normalise_count(raw_count)
 	end
 
 	# Removes reserved engine properties from a metadata hash.
@@ -159,11 +183,6 @@ class Template
 		Jekyll::Plugins::Relationships::Support::FrontmatterPath.read_hash(hash, property)
 	end
 
-	# Builds one active placeholder token including its angle brackets.
-	def placeholder(keyword_name)
-		"<#{@keywords.fetch(keyword_name)}>"
-	end
-
 	# Converts one hash to a shallow string-keyed copy.
 	def stringify_hash(hash)
 		return {} unless hash.is_a?(Hash)
@@ -171,6 +190,20 @@ class Template
 		hash.each_with_object({}) do |(key, value), stringified|
 			stringified[key.to_s] = value
 		end
+	end
+
+	# Validates and normalises one reference count.
+	def normalise_count(value)
+		integer_count = if value.is_a?(Integer)
+							 value
+						 elsif value.is_a?(String) && value.strip.match?(/\A\d+\z/)
+							 value.to_i
+						 else
+							 raise ResolutionError, "Relationship count `#{value.inspect}` must be a positive integer."
+						 end
+		raise ResolutionError, "Relationship count `#{value.inspect}` must be a positive integer." if integer_count < 1
+
+		integer_count
 	end
 end
 

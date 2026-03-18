@@ -252,7 +252,8 @@ class Graph
 	def build_reference(document, primary_path:, distance: nil)
 		reference = @configuration.reference_template.build(
 			document: document,
-			key: @registry.key_for(document, primary_path: primary_path)
+			key: @registry.key_for(document, primary_path: primary_path),
+			include_count: false
 		)
 		reference['distance'] = distance unless distance.nil?
 		reference

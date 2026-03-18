@@ -89,6 +89,11 @@ module RelationshipsIntegrationHelpers
 		normalise_references(references).map { |reference| reference.fetch(key) }
 	end
 
+	# Extracts one property from each normalised reference in order.
+	def reference_values(references, property)
+		normalise_references(references).map { |reference| reference.fetch(property) }
+	end
+
 	# Defines one temporary resolver class for the current example.
 	def define_resolver(name, from:, to:, &block)
 		resolver_class = Class.new(Jekyll::Plugins::Relationships::Resolvers::Base)

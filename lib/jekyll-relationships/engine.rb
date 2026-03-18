@@ -40,6 +40,7 @@ class Engine
 	def process!
 		return if @configuration.collections.empty?
 
+		@registry.validate_collections!
 		@registry.validate_primary_paths!(primary_paths: @configuration.primary_paths)
 		@tree_graph.build!
 		resolve_all_relationships!
@@ -54,14 +55,17 @@ class Engine
 			path: path,
 			data_path: @data_path,
 			string_array: @string_array,
-			reference_template: @configuration.reference_template
+			reference_template: @configuration.reference_template,
+			multiple_settings: @configuration.multiple_settings
 		)
 	end
 
 	# Resolves and returns one relationship array.
 	def resolve_relationships(document, to_collection)
 		state = relationship_state(document, to_collection)
-		return [] unless state
+		unless state
+			raise ResolutionError, "No relationship is defined from collection `#{document.collection.label}` to `#{to_collection}`."
+		end
 
 		resolve_state(state)
 		state.current_references
@@ -99,11 +103,11 @@ class Engine
 	end
 
 	# Mirrors one bidirectional add into the reverse state.
-	def mirror_add(source_state:, target_document:, metadata:)
+	def mirror_add(source_state:, target_document:, metadata:, count:)
 		mirror_state = relationship_state(target_document, source_state.definition.from_collection)
 		return unless mirror_state
 
-		mirror_state.link(source_state.document, metadata: metadata, reflect: false)
+		mirror_state.link(source_state.document, metadata: metadata, count: count, reflect: false)
 	end
 
 	# Mirrors one bidirectional removal into the reverse state.

@@ -37,6 +37,14 @@ class Registry
 		site_collection.docs
 	end
 
+	# Ensures every configured relationship collection exists on the Jekyll site.
+	def validate_collections!
+		missing_collections = @collections.reject { |collection| @site.collections.key?(collection) }
+		return if missing_collections.empty?
+
+		raise ConfigurationError, "Relationship collections are not defined on the site: #{missing_collections.sort.join(', ')}."
+	end
+
 	# Builds every requested primary-key index so duplicates fail eagerly.
 	def validate_primary_paths!(primary_paths:)
 		Array(primary_paths).uniq.each do |primary_path|

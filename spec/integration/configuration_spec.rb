@@ -3,15 +3,14 @@
 require 'spec_helper'
 
 RSpec.describe 'relationships configuration' do
-	it 'supports overridden keywords for self relationships and collection placeholders' do
+	it 'supports overridden keywords for self relationships while collection placeholders stay literal' do
 		relationships = {
 			'keywords' => {
-				'self' => 'itself',
-				'collection' => 'bucket'
+				'self' => 'itself'
 			},
 			'frontmatter' => {
 				'base' => 'links',
-				'foreign' => '<bucket>'
+				'foreign' => '<collection>'
 			},
 			'relationships' => [
 				{ 'from' => 'products', 'to' => 'itself' }
@@ -151,7 +150,8 @@ RSpec.describe 'relationships configuration' do
 			'references' => {
 				'slug' => '<key>',
 				'bucket' => '<collection>',
-				'entry' => '<page>'
+				'entry' => '<page>',
+				'occurrences' => '<count>'
 			},
 			'relationships' => [
 				{ 'from' => 'projects', 'to' => 'services' }
@@ -171,11 +171,90 @@ RSpec.describe 'relationships configuration' do
 			project = document_for(site, 'projects', 'alpha')
 			reference = project.data.fetch('relationships').fetch('services').first
 
-			expect(reference.keys).to contain_exactly('slug', 'bucket', 'entry')
+			expect(reference.keys).to contain_exactly('slug', 'bucket', 'entry', 'occurrences')
 			expect(reference.fetch('slug')).to eq('services/design')
 			expect(reference.fetch('bucket')).to eq('services')
 			expect(reference.fetch('entry')).to be_a(Jekyll::Document)
+			expect(reference.fetch('occurrences')).to eq(1)
 		end
+	end
+
+	it 'requires an explicit <count> property when custom references are used in count mode' do
+		relationships = {
+			'references' => {
+				'slug' => '<key>',
+				'bucket' => '<collection>',
+				'entry' => '<page>'
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha'),
+			collection_document('services', 'design')
+		)
+
+		expect do
+			build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) { |_site, _files| nil }
+		end.to raise_error(JekyllTestHarness::SiteBuildError, /<count>/i)
+	end
+
+	it 'ignores configured <count> properties outside count mode' do
+		relationships = {
+			'multiple' => 'drop',
+			'references' => {
+				'slug' => '<key>',
+				'bucket' => '<collection>',
+				'entry' => '<page>',
+				'occurrences' => '<count>'
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'services' => [
+						{ 'slug' => 'services/design', 'occurrences' => 9 },
+						{ 'slug' => 'services/design', 'occurrences' => 2 }
+					]
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			reference = project.data.fetch('relationships').fetch('services').first
+
+			expect(reference.keys).to contain_exactly('slug', 'bucket', 'entry')
+			expect(reference.fetch('slug')).to eq('services/design')
+		end
+	end
+
+	it 'rejects duplicate sorting outside count mode' do
+		relationships = {
+			'multiple' => {
+				'mode' => 'keep',
+				'sort' => 'desc'
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha'),
+			collection_document('services', 'design')
+		)
+
+		expect do
+			build_relationship_site(collections: %w[projects services], relationships: relationships, files: files) { |_site, _files| nil }
+		end.to raise_error(JekyllTestHarness::SiteBuildError, /multiple\.sort/i)
 	end
 
 	it 'rejects reference config nested under frontmatter' do
@@ -254,6 +333,22 @@ RSpec.describe 'relationships configuration' do
 		expect do
 			build_relationship_site(collections: %w[products categories tags], relationships: relationships, files: files) { |_site, _files| nil }
 		end.to raise_error(JekyllTestHarness::SiteBuildError, /ambiguous/i)
+	end
+
+	it 'raises when relationship config references collections missing from the site' do
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'clients' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha')
+		)
+
+		expect do
+			build_relationship_site(collections: %w[projects], relationships: relationships, files: files) { |_site, _files| nil }
+		end.to raise_error(JekyllTestHarness::SiteBuildError, /relationship collections are not defined on the site: clients/i)
 	end
 
 	it 'raises when primary keys are duplicated within a collection' do

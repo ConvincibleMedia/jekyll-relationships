@@ -5,6 +5,7 @@ require 'jekyll-relationships/definitions/tree_relationship'
 require 'jekyll-relationships/configuration/defaults'
 require 'jekyll-relationships/configuration/hash_utilities'
 require 'jekyll-relationships/configuration/frontmatter'
+require 'jekyll-relationships/configuration/multiple_settings'
 require 'jekyll-relationships/configuration/tree_frontmatter'
 require 'jekyll-relationships/configuration/tree_settings'
 require 'jekyll-relationships/configuration/parser'
@@ -19,7 +20,7 @@ module Relationships
 # The object resolves defaults once, exposes the final keyword and frontmatter
 # rules, and indexes the concrete relationship definitions used by the engine.
 class Configuration
-	attr_reader :keywords, :reference_template, :tree_settings, :global_frontmatter
+	attr_reader :keywords, :multiple_settings, :reference_template, :tree_settings, :global_frontmatter
 
 	# Builds the full configuration model from `site.config`.
 	def initialize(site_config)
@@ -28,17 +29,19 @@ class Configuration
 		global_frontmatter_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'frontmatter')
 		global_tree_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'tree')
 		@keywords = build_keywords(Configuration::HashUtilities.fetch_hash_value(@raw_config, 'keywords'))
+		@multiple_settings = MultipleSettings.new(
+			raw_config: Configuration::HashUtilities.fetch_hash_value(@raw_config, 'multiple')
+		)
 		@global_frontmatter = Frontmatter.new(
 			raw_config: Configuration::HashUtilities.merge_hash(
 				Defaults::FRONTMATTER,
 				global_frontmatter_override
 			),
-			keywords: @keywords,
 			string_array: @string_array
 		)
 		@reference_template = References::Template.new(
 			config: build_reference_config,
-			keywords: @keywords
+			count_enabled: @multiple_settings.count?
 		)
 		@tree_settings = TreeSettings.defaults(
 			string_array: @string_array
@@ -102,10 +105,13 @@ class Configuration
 	# Builds the resolved reference template config.
 	def build_reference_config
 		default_references = {
-			'id' => placeholder('key'),
-			'collection' => placeholder('collection'),
-			'page' => placeholder('page')
+			'id' => Jekyll::Plugins::Relationships::Support::Placeholders::KEY,
+			'collection' => Jekyll::Plugins::Relationships::Support::Placeholders::COLLECTION,
+			'page' => Jekyll::Plugins::Relationships::Support::Placeholders::PAGE
 		}
+		if @multiple_settings.count?
+			default_references['count'] = Jekyll::Plugins::Relationships::Support::Placeholders::COUNT
+		end
 		explicit_config = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'references')
 		return explicit_config if explicit_config.is_a?(Hash)
 
@@ -136,11 +142,6 @@ class Configuration
 				definition.add_resolver(resolver_class)
 			end
 		end
-	end
-
-	# Returns one placeholder token for the active keyword set.
-	def placeholder(name)
-		"<#{@keywords.fetch(name)}>"
 	end
 end
 

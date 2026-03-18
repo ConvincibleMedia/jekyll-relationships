@@ -28,11 +28,12 @@ RSpec.describe 'normal relationships' do
 			expect(references.first.fetch('id')).to eq('categories/trainers')
 			expect(references.first.fetch('collection')).to eq('categories')
 			expect(references.first.fetch('page')).to eq(category)
+			expect(references.first.fetch('count')).to eq(1)
 			expect(category.data.fetch('relationships', {})).not_to have_key('products')
 		end
 	end
 
-	it 'deduplicates links gathered from multiple input paths and rewrites the final set onto the first path' do
+	it 'counts duplicate links gathered from multiple input paths and rewrites the final set onto the first path' do
 		define_resolver('FirstPathDeduper', from: 'products', to: 'categories') do
 			def resolve
 				link('categories/extra', reference: { 'source' => 'resolver' })
@@ -80,9 +81,11 @@ RSpec.describe 'normal relationships' do
 				'categories/three',
 				'categories/extra'
 			])
+			expect(reference_values(primary_links, 'count')).to eq([2, 2, 1, 1])
 			expect(primary_links[1].fetch('note')).to eq('first-seen-here')
 			expect(primary_links.last.fetch('source')).to eq('resolver')
 			expect(reference_ids(secondary_links)).to eq(['categories/two', 'categories/three'])
+			expect(reference_values(secondary_links, 'count')).to eq([1, 1])
 		end
 	end
 
@@ -129,6 +132,7 @@ RSpec.describe 'normal relationships' do
 				'categories/two',
 				'categories/extra'
 			])
+			expect(reference_values(data.fetch('resolved').fetch('categories'), 'count')).to eq([1, 1, 1])
 		end
 	end
 
@@ -265,6 +269,202 @@ RSpec.describe 'normal relationships' do
 			related = project.data.fetch('data').fetch('resolved').fetch('related')
 
 			expect(reference_ids(related)).to eq(['services/design', 'articles/launch-notes'])
+			expect(reference_values(related, 'count')).to eq([1, 1])
+		end
+	end
+
+	it 'supports explicit counts and merges duplicate metadata under the first occurrence' do
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'products', 'to' => 'categories' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'categories' => [
+						{
+							'id' => 'categories/one',
+							'count' => 2,
+							'details' => {
+								'keep' => 'first',
+								'source' => 'raw'
+							}
+						},
+						{
+							'id' => 'categories/one',
+							'details' => {
+								'keep' => 'later',
+								'added' => 'second'
+							},
+							'note' => 'later-note'
+						},
+						{
+							'id' => 'categories/two',
+							'count' => 3
+						}
+					]
+				}
+			}),
+			collection_document('categories', 'one'),
+			collection_document('categories', 'two')
+		)
+
+		build_relationship_site(collections: %w[products categories], relationships: relationships, files: files) do |site, _files|
+			product = document_for(site, 'products', 'alpha')
+			references = product.data.fetch('relationships').fetch('categories')
+			first_reference = references.first
+
+			expect(reference_ids(references)).to eq(['categories/one', 'categories/two'])
+			expect(reference_values(references, 'count')).to eq([3, 3])
+			expect(first_reference.fetch('details')).to eq({
+				'keep' => 'first',
+				'source' => 'raw',
+				'added' => 'second'
+			})
+			expect(first_reference.fetch('note')).to eq('later-note')
+		end
+	end
+
+	it 'supports legacy duplicate dropping without writing count fields' do
+		relationships = {
+			'multiple' => 'drop',
+			'relationships' => [
+				{ 'from' => 'products', 'to' => 'categories' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'categories' => ['categories/one', 'categories/one', 'categories/two']
+				}
+			}),
+			collection_document('categories', 'one'),
+			collection_document('categories', 'two')
+		)
+
+		build_relationship_site(collections: %w[products categories], relationships: relationships, files: files) do |site, _files|
+			product = document_for(site, 'products', 'alpha')
+			references = product.data.fetch('relationships').fetch('categories')
+
+			expect(reference_ids(references)).to eq(['categories/one', 'categories/two'])
+			expect(references).to all(satisfy { |reference| !reference.key?('count') })
+		end
+	end
+
+	it 'supports keeping duplicate links without deduping them' do
+		relationships = {
+			'multiple' => 'keep',
+			'relationships' => [
+				{ 'from' => 'products', 'to' => 'categories' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'categories' => ['categories/one', 'categories/one', 'categories/two']
+				}
+			}),
+			collection_document('categories', 'one'),
+			collection_document('categories', 'two')
+		)
+
+		build_relationship_site(collections: %w[products categories], relationships: relationships, files: files) do |site, _files|
+			product = document_for(site, 'products', 'alpha')
+			references = product.data.fetch('relationships').fetch('categories')
+
+			expect(reference_ids(references)).to eq(['categories/one', 'categories/one', 'categories/two'])
+			expect(references).to all(satisfy { |reference| !reference.key?('count') })
+		end
+	end
+
+	it 'sorts counted links by descending count while retaining first-seen order for ties' do
+		relationships = {
+			'multiple' => {
+				'mode' => 'count',
+				'sort' => 'desc'
+			},
+			'relationships' => [
+				{ 'from' => 'products', 'to' => 'categories' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'categories' => [
+						'categories/three',
+						'categories/one',
+						'categories/two',
+						'categories/three',
+						'categories/one'
+					]
+				}
+			}),
+			collection_document('categories', 'one'),
+			collection_document('categories', 'two'),
+			collection_document('categories', 'three')
+		)
+
+		build_relationship_site(collections: %w[products categories], relationships: relationships, files: files) do |site, _files|
+			product = document_for(site, 'products', 'alpha')
+			references = product.data.fetch('relationships').fetch('categories')
+
+			expect(reference_ids(references)).to eq(['categories/three', 'categories/one', 'categories/two'])
+			expect(reference_values(references, 'count')).to eq([2, 2, 1])
+		end
+	end
+
+	it 'sorts counted links after merging states onto one shared output path' do
+		relationships = {
+			'multiple' => {
+				'mode' => 'count',
+				'sort' => 'asc'
+			},
+			'frontmatter' => {
+				'base' => 'data',
+				'foreign' => 'refs.<collection>'
+			},
+			'relationships' => [
+				{
+					'from' => 'projects',
+					'to' => 'services',
+					'frontmatter' => {
+						'output' => 'resolved.related'
+					}
+				},
+				{
+					'from' => 'projects',
+					'to' => 'articles',
+					'frontmatter' => {
+						'output' => 'resolved.related'
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'data' => {
+					'refs' => {
+						'services' => ['services/design', 'services/design'],
+						'articles' => ['articles/launch-notes']
+					}
+				}
+			}),
+			collection_document('services', 'design'),
+			collection_document('articles', 'launch-notes')
+		)
+
+		build_relationship_site(collections: %w[projects services articles], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			related = project.data.fetch('data').fetch('resolved').fetch('related')
+
+			expect(reference_ids(related)).to eq(['articles/launch-notes', 'services/design'])
+			expect(reference_values(related, 'count')).to eq([1, 2])
 		end
 	end
 
@@ -275,6 +475,7 @@ RSpec.describe 'normal relationships' do
 					'id' => 'ignored',
 					'collection' => 'ignored',
 					'page' => 'ignored',
+					'count' => 99,
 					'note' => 'resolver-note'
 				})
 			end
@@ -307,6 +508,7 @@ RSpec.describe 'normal relationships' do
 			expect(references[1].fetch('id')).to eq('services/strategy')
 			expect(references[1].fetch('collection')).to eq('services')
 			expect(references[1].fetch('page')).to be_a(Jekyll::Document)
+			expect(references.map { |reference| reference.fetch('count') }).to eq([1, 1])
 		end
 	end
 end

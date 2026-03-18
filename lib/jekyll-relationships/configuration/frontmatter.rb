@@ -13,9 +13,8 @@ class Configuration
 	# rest of the engine can work with explicit values only.
 	class Frontmatter
 		# Builds one frontmatter configuration helper.
-		def initialize(raw_config:, keywords:, string_array:)
+		def initialize(raw_config:, string_array:)
 			@raw_config = raw_config.is_a?(Hash) ? raw_config : {}
-			@keywords = keywords
 			@string_array = string_array
 		end
 
@@ -66,7 +65,6 @@ class Configuration
 		def merge(raw_override)
 			self.class.new(
 				raw_config: Configuration::HashUtilities.merge_hash(@raw_config, raw_override),
-				keywords: @keywords,
 				string_array: @string_array
 			)
 		end
@@ -93,7 +91,7 @@ class Configuration
 
 		# Returns the active `<collection>` placeholder token.
 		def collection_placeholder
-			"<#{@keywords.fetch('collection')}>"
+			Jekyll::Plugins::Relationships::Support::Placeholders::COLLECTION
 		end
 	end
 end

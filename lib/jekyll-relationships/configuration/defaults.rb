@@ -32,13 +32,15 @@ class Configuration
 			'url' => false
 		}.freeze
 
+		MULTIPLE = {
+			'mode' => 'count',
+			'sort' => nil
+		}.freeze
+
 		KEYWORDS = {
 			'self' => 'self',
 			'others' => 'others',
-			'all' => 'all',
-			'collection' => 'collection',
-			'key' => 'key',
-			'page' => 'page'
+			'all' => 'all'
 		}.freeze
 	end
 end
