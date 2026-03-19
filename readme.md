@@ -8,6 +8,8 @@ How documents link to each other is specified by configuration.
 
 ```yaml
 relationships:
+  enabled: true # set to false for global disable
+
   # The relationships that exist on this site
   relationships: # array, see Relationships below
 
@@ -37,6 +39,9 @@ relationships:
       parents: -1 # max parents per item (-1 = unlimited)
       children: -1 # max children per item
     url: false # infer parent by item url
+
+  # What should happen to multiple links to the same thing?
+  multiple: drop # see Multiple Links below
 
   # Override keywords in case they are a clash with your collection/frontmatter names
   keywords: # see Keywords below
@@ -367,6 +372,28 @@ class ProjectServices < Jekyll::Plugins::Relationships::Resolvers::Base
   end
 
 end
+```
+
+## Multiple Links
+
+By default, A can only link to B once. If the same link is given again, further links are ignored. You can control this behaviour with `relationships.multiple`. This can be:
+
+* A string:
+  * `drop`: default behaviour, no multiple links
+  * `keep`: allow multiple links to the same thing
+  * `count`: collapse multiple links, but keep a count of how many times it was linked, on the reference hash
+* A hash where:
+  * `mode` is one of the above
+  * `sort` is `asc` or `desc`. Sort is only applicable to `mode: count`. Links will be sorted by the number of times that they were linked, in ascending/descending order.
+
+In `count` mode, the reference hash additionally has a `count` key. You can change where this key appears with:
+
+```yaml
+references:
+  my_key: <key>
+  my_collection: <collection>
+  my_page: <page>
+  my_count: <count>
 ```
 
 
