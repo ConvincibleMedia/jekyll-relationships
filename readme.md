@@ -429,12 +429,13 @@ relationships:
       min: 2 # prune a category if it has fewer than 2 parents
       depth: -1 # only prune non-root nodes
   - from: products
-    to: self
     mode: parent
-    prune:
-      mode: inverse
-      min: 2 # prune a product if it has fewer than 2 children
-      depth: 1 # only prune root notes
+    to:
+    - collection: self
+      prune:
+        mode: inverse
+        min: 2 # prune a product if it has fewer than 2 children
+        depth: 1 # only prune root notes
   prune:
     combine: true # default
     iterations: 10 # default
@@ -442,7 +443,7 @@ relationships:
       orphans: grandparents # default
 ```
 
-`prune` on each relationship entry allows:
+`prune` on each relationship/target entry allows:
 
 * `min` (required): the minimum number of related documents needed to survive.
 * `mode: inverse` (optional): prune the `to` side instead of the `from` side.
@@ -456,6 +457,8 @@ If pruning removes a node from a tree, any children that lose all parents become
 * `grandparents required`: as above, but also remove the orphan if there is no grandparent to connec to.
 * `prune`: prune all orphans recursively.
 * `orphan`: leave them parentless.
+
+`prune` can also be `false` to disable pruning at that level, or an integer as a shortcut for `prune: min: int`.
 
 
 ## Keywords

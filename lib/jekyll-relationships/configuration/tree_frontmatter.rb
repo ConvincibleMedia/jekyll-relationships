@@ -69,12 +69,22 @@ class Configuration
 		end
 
 		# Returns every absolute input path used to read parent references.
-		def parent_input_paths
+		#
+		# Single-parent trees only read the singular parent keys, matching the
+		# documented contract that plural keys are ignored once the maximum is 1.
+		def parent_input_paths(max_parents:)
+			return paths_for('parent') if max_parents == 1
+
 			(paths_for('parent') + paths_for('parents')).uniq
 		end
 
 		# Returns every absolute input path used to read child references.
-		def child_input_paths
+		#
+		# Single-child trees mirror the parent-side behaviour and only read the
+		# singular child keys when the configured maximum is 1.
+		def child_input_paths(max_children:)
+			return paths_for('child') if max_children == 1
+
 			(paths_for('child') + paths_for('children')).uniq
 		end
 

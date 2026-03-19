@@ -381,6 +381,86 @@ RSpec.describe 'relationship resolvers' do
 		end
 	end
 
+	it 'supports parent, child, and descendant tree helper methods during normal resolution' do
+		define_resolver('PageInheritedServicesFromSections', from: 'pages', to: 'services') do
+			def resolve
+				relationships(to: 'sections').each do |section|
+					parents(section).each do |parent|
+						relationships(parent, to: 'services').each do |service|
+							link(service, reference: { 'via' => 'parent' })
+						end
+					end
+
+					children(section).each do |child|
+						relationships(child, to: 'services').each do |service|
+							link(service, reference: { 'via' => 'child' })
+						end
+					end
+
+					descendants(section, min: 2, max: 2).each do |grandchild|
+						relationships(grandchild, to: 'services').each do |service|
+							link(service, reference: { 'via' => 'grandchild' })
+						end
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'sections', 'to' => 'self', 'mode' => 'parent' },
+				{ 'from' => 'sections', 'to' => 'services' },
+				{ 'from' => 'pages', 'to' => 'sections' },
+				{ 'from' => 'pages', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('sections', 'root', {
+				'relationships' => {
+					'services' => ['services/strategy']
+				}
+			}),
+			collection_document('sections', 'guides', {
+				'relationships' => {
+					'parent' => 'sections/root'
+				}
+			}),
+			collection_document('sections', 'setup', {
+				'relationships' => {
+					'parent' => 'sections/guides',
+					'services' => ['services/implementation']
+				}
+			}),
+			collection_document('sections', 'api', {
+				'relationships' => {
+					'parent' => 'sections/setup',
+					'services' => ['services/support']
+				}
+			}),
+			collection_document('pages', 'getting-started', {
+				'relationships' => {
+					'sections' => ['sections/guides']
+				}
+			}),
+			collection_document('services', 'strategy'),
+			collection_document('services', 'implementation'),
+			collection_document('services', 'support')
+		)
+
+		build_relationship_site(collections: %w[sections pages services], relationships: relationships, files: files) do |site, _files|
+			page = document_for(site, 'pages', 'getting-started')
+			services = page.data.fetch('relationships').fetch('services')
+
+			expect(reference_ids(services)).to eq([
+				'services/strategy',
+				'services/implementation',
+				'services/support'
+			])
+			expect(reference_values(services, 'via')).to eq(%w[parent child grandchild])
+		end
+	end
+
 	it 'detects cyclic resolver dependencies between normal relationships' do
 		define_resolver('CategoriesNeedServices', from: 'products', to: 'categories') do
 			def resolve

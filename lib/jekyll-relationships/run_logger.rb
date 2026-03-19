@@ -20,23 +20,26 @@ class RunLogger
 	end
 
 	# Logs one multi-line summary of the configured relationships.
-	def relationship_summary(lines:, relationship_count:)
+	def relationship_summary(entries:, relationship_count:)
 		log_lines(
 			header: "#{relationship_count} relationships defined.",
-			lines: lines
+			lines: justified_lines(entries)
 		)
 	end
 
 	# Logs one multi-line summary of the documents removed by pruning.
 	def pruning_summary(removed_documents_by_collection:)
 		total_removed = removed_documents_by_collection.values.flatten.length
-		lines = removed_documents_by_collection.keys.sort.map do |collection|
+		entries = removed_documents_by_collection.keys.sort.map do |collection|
 			documents = removed_documents_by_collection.fetch(collection)
-			"#{collection}:#{NON_BREAKING_SPACE} #{documents.length} removed (#{removed_filenames(documents)})"
+			{
+				label: "#{collection}:",
+				details: "#{documents.length} removed (#{removed_filenames(documents)})"
+			}
 		end
 		log_lines(
 			header: "Removed #{total_removed} items because of pruning rules.",
-			lines: lines
+			lines: justified_lines(entries)
 		)
 	end
 
@@ -79,6 +82,16 @@ class RunLogger
 		return text if included_names.length == filenames.length
 
 		"#{text}, ..."
+	end
+
+	# Aligns summary details with non-breaking spaces so Jekyll preserves padding.
+	def justified_lines(entries)
+		maximum_label_length = Array(entries).map { |entry| entry.fetch(:label).length }.max || 0
+		Array(entries).map do |entry|
+			label = entry.fetch(:label)
+			padding_width = [maximum_label_length - label.length, 0].max + 1
+			"#{label}#{NON_BREAKING_SPACE * padding_width}#{entry.fetch(:details)}"
+		end
 	end
 end
 

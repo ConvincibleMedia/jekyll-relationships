@@ -7,17 +7,33 @@ module Relationships
 
 class Configuration
 
-	# Normalises one relationship-level prune configuration block.
+	# Normalises one relationship-level or target-level prune configuration block.
 	#
-	# Relationship entries may opt into pruning by defining a minimum neighbour
-	# count and, optionally, switching the subject of the rule to the inverse side
-	# of the relationship. Tree prune rules may also constrain which depths are
-	# eligible for pruning.
+	# Relationship entries and hash-form targets may opt into pruning by defining
+	# a minimum neighbour count and, optionally, switching the subject of the rule
+	# to the inverse side of the relationship. Tree prune rules may also
+	# constrain which depths are eligible for pruning.
 	class PruneRuleSettings
 		attr_reader :mode, :min, :depth
 
+		# Interprets one loose prune config value.
+		def self.build(raw_config:, context:)
+			return false if raw_config == false
+			return new(raw_config: raw_config, context: context, shortcut: true) if raw_config.is_a?(Integer)
+
+			new(raw_config: raw_config, context: context, shortcut: false)
+		end
+
 		# Builds one immutable prune-rule helper from raw configuration.
-		def initialize(raw_config:, context:)
+		def initialize(raw_config:, context:, shortcut:)
+			@shortcut = shortcut
+			if @shortcut
+				@mode = 'direct'
+				@min = normalise_min(raw_config, context: context)
+				@depth = nil
+				return
+			end
+
 			raise ConfigurationError, "`#{context}` must be a hash." unless raw_config.is_a?(Hash)
 
 			@mode = normalise_mode(
@@ -37,6 +53,11 @@ class Configuration
 		# Returns true when the rule prunes the inverse side of the relationship.
 		def inverse?
 			@mode == 'inverse'
+		end
+
+		# Returns true when the rule came from the integer shorthand form.
+		def shortcut?
+			@shortcut
 		end
 
 		private

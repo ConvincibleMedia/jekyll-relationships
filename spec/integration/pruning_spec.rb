@@ -32,6 +32,33 @@ RSpec.describe 'pruning' do
 		end
 	end
 
+	it 'supports integer prune shorthand for normal relationships' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'projects',
+					'to' => 'categories',
+					'prune' => 1
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'kept', {
+				'relationships' => {
+					'categories' => ['categories/one']
+				}
+			}),
+			collection_document('projects', 'pruned'),
+			collection_document('categories', 'one')
+		)
+
+		build_relationship_site(collections: %w[projects categories], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('projects').docs.map(&:basename_without_ext)).to eq(['kept'])
+			expect(reference_ids(document_for(site, 'projects', 'kept').data.fetch('relationships').fetch('categories'))).to eq(['categories/one'])
+		end
+	end
+
 	it 'prunes inverse normal relationship subjects after bidirectional resolution' do
 		relationships = {
 			'relationships' => [
@@ -141,6 +168,115 @@ RSpec.describe 'pruning' do
 
 		build_relationship_site(collections: %w[products categories services], relationships: relationships, files: files) do |site, _files|
 			expect(site.collections.fetch('products').docs.map(&:basename_without_ext)).to eq(['kept'])
+		end
+	end
+
+	it 'supports target-level pruning on hash-form targets with comma-delimited collections' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'projects',
+					'to' => [
+						{
+							'collection' => 'projects',
+							'frontmatter' => {
+								'base' => '',
+								'foreign' => 'data.body.imagery.projects'
+							}
+						},
+						{
+							'collection' => 'audiences, org_types, industries',
+							'prune' => {
+								'min' => 1
+							}
+						},
+						{
+							'collection' => 'clients',
+							'frontmatter' => {
+								'base' => '',
+								'foreign' => 'data.client'
+							},
+							'mode' => 'bidirectional',
+							'prune' => {
+								'mode' => 'inverse',
+								'min' => 1
+							}
+						}
+					]
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'audiences' => ['audiences/one']
+				},
+				'data' => {
+					'client' => 'clients/kept',
+					'body' => {
+						'imagery' => {
+							'projects' => ['projects/alpha']
+						}
+					}
+				}
+			}),
+			collection_document('projects', 'beta', {
+				'data' => {
+					'client' => 'clients/pruned'
+				}
+			}),
+			collection_document('clients', 'kept'),
+			collection_document('clients', 'pruned'),
+			collection_document('audiences', 'one')
+		)
+
+		build_relationship_site(collections: %w[projects clients audiences org_types industries], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('projects').docs.map(&:basename_without_ext)).to eq(['alpha'])
+			expect(site.collections.fetch('clients').docs.map(&:basename_without_ext)).to eq(['kept'])
+			expect(reference_ids(document_for(site, 'projects', 'alpha').data.fetch('relationships').fetch('audiences'))).to eq(['audiences/one'])
+			expect(reference_ids(document_for(site, 'projects', 'alpha').data.fetch('data').fetch('body').fetch('imagery').fetch('projects'))).to eq(['projects/alpha'])
+		end
+	end
+
+	it 'lets target-level prune false disable inherited pruning for that target only' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'projects',
+					'to' => [
+						'industries',
+						{
+							'collection' => 'clients',
+							'prune' => false
+						}
+					],
+					'prune' => {
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'client-only', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('projects', 'industry-linked', {
+				'relationships' => {
+					'industries' => ['industries/finance']
+				}
+			}),
+			collection_document('clients', 'acme'),
+			collection_document('industries', 'finance')
+		)
+
+		build_relationship_site(collections: %w[projects clients industries], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('projects').docs.map(&:basename_without_ext)).to eq(['industry-linked'])
+			expect(site.collections.fetch('clients').docs.map(&:basename_without_ext)).to eq(['acme'])
+			expect(reference_ids(document_for(site, 'projects', 'industry-linked').data.fetch('relationships').fetch('industries'))).to eq(['industries/finance'])
 		end
 	end
 
@@ -563,8 +699,8 @@ RSpec.describe 'pruning' do
 		end
 
 		expect(log_messages).to include('2 relationships defined.')
-		expect(log_messages).to include('├─ articles → tags (1 linked to 1)')
-		expect(log_messages).to include('└─ products → categories (1 linked to 1)')
+		expect(log_messages).to include("├─ articles#{Jekyll::Plugins::Relationships::RunLogger::NON_BREAKING_SPACE}→ tags (1 linked to 1)")
+		expect(log_messages).to include("└─ products#{Jekyll::Plugins::Relationships::RunLogger::NON_BREAKING_SPACE}→ categories (1 linked to 1)")
 		expect(log_messages).to include('Removed 0 items because of pruning rules.')
 		expect(log_messages).to include(a_string_matching(/\ADone in \d+\.\d{2} seconds\.\z/))
 	end
@@ -598,7 +734,7 @@ RSpec.describe 'pruning' do
 		end
 
 		expect(log_messages).to include('Removed 3 items because of pruning rules.')
-		expect(log_messages).to include("└─ products:\u00a0 3 removed (#{first_name}.md, #{second_name}.md, ...)")
+		expect(log_messages).to include("└─ products:#{Jekyll::Plugins::Relationships::RunLogger::NON_BREAKING_SPACE}3 removed (#{first_name}.md, #{second_name}.md, ...)")
 		expect(log_messages.join("\n")).not_to include("#{third_name}.md")
 	end
 end

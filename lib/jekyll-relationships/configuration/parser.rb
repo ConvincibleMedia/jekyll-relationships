@@ -56,7 +56,7 @@ class Configuration
 
 				relationship_frontmatter = Configuration::HashUtilities.fetch_hash_value(entry, 'frontmatter')
 				relationship_tree = Configuration::HashUtilities.fetch_hash_value(entry, 'tree')
-				prune_configuration = relationship_prune_setting(entry: entry, entry_index: entry_index)
+				relationship_prune_configuration = relationship_prune_setting(entry: entry, entry_index: entry_index)
 				relationship_debug = relationship_debug_setting(entry: entry, entry_index: entry_index)
 				relationship_mode = normalise_mode(Configuration::HashUtilities.fetch_hash_value(entry, 'mode'))
 				effective_relationship_frontmatter = @global_frontmatter.merge(relationship_frontmatter)
@@ -65,12 +65,22 @@ class Configuration
 					tree_override: relationship_tree
 				)
 				effective_relationship_debug = relationship_debug.nil? ? @global_debug : relationship_debug
-				entry_members = []
+				prune_members_by_configuration = Hash.new { |hash, key| hash[key] = [] }
+				target_prune_configuration_cache = {}
+				resolved_targets = targets.map do |target|
+					{
+						descriptor: target,
+						prune_overridden: target.key?('prune'),
+						prune_configuration: target_prune_setting(target: target, entry_index: entry_index, cache: target_prune_configuration_cache),
+						debug_setting: target_debug_setting(target: target, entry_index: entry_index)
+					}
+				end
 
 				from_collections.each do |from_collection|
 					collections << from_collection
 
-					targets.each do |target|
+					resolved_targets.each do |resolved_target|
+						target = resolved_target.fetch(:descriptor)
 						expanded_targets(
 							token: target.fetch('collection'),
 							from_collections: from_collections,
@@ -83,11 +93,13 @@ class Configuration
 								frontmatter_override: target['frontmatter'],
 								tree_override: target['tree']
 							)
-							target_debug = target_debug_setting(
-								target: target,
-								entry_index: entry_index
-							)
+							target_debug = resolved_target.fetch(:debug_setting)
 							effective_debug = target_debug.nil? ? effective_relationship_debug : target_debug
+							effective_prune_configuration = effective_prune_configuration(
+								target_prune_configuration: resolved_target.fetch(:prune_configuration),
+								target_overrides_prune: resolved_target.fetch(:prune_overridden),
+								relationship_prune_configuration: relationship_prune_configuration
+							)
 
 							if tree_mode?(effective_mode)
 								tree_definition = register_tree_relationship(
@@ -107,7 +119,11 @@ class Configuration
 									mode: effective_mode,
 									sequence: sequence
 								)
-								entry_members << configured_relationships.last
+								register_prune_member!(
+									prune_members_by_configuration: prune_members_by_configuration,
+									prune_configuration: effective_prune_configuration,
+									member: configured_relationships.last
+								)
 								sequence += 1
 							else
 								registration = register_normal_relationships(
@@ -126,21 +142,27 @@ class Configuration
 									mode: effective_mode,
 									sequence: sequence
 								)
-								entry_members << configured_relationships.last
+								register_prune_member!(
+									prune_members_by_configuration: prune_members_by_configuration,
+									prune_configuration: effective_prune_configuration,
+									member: configured_relationships.last
+								)
 								sequence = registration.fetch(:sequence)
 							end
 						end
 					end
 				end
 
-				register_prune_rules!(
-					entry_members: entry_members,
-					prune_configuration: prune_configuration,
-					normal_prune_rules: normal_prune_rules,
-					tree_prune_rules: tree_prune_rules,
-					prune_rule_occupancy: prune_rule_occupancy,
-					entry_index: entry_index
-				)
+				prune_members_by_configuration.each do |prune_configuration, prune_members|
+					register_prune_rules!(
+						entry_members: prune_members,
+						prune_configuration: prune_configuration,
+						normal_prune_rules: normal_prune_rules,
+						tree_prune_rules: tree_prune_rules,
+						prune_rule_occupancy: prune_rule_occupancy,
+						entry_index: entry_index
+					)
+				end
 			end
 
 			{
@@ -258,7 +280,7 @@ class Configuration
 
 		# Registers every prune rule produced by one raw relationship entry.
 		def register_prune_rules!(entry_members:, prune_configuration:, normal_prune_rules:, tree_prune_rules:, prune_rule_occupancy:, entry_index:)
-			return if prune_configuration.nil?
+			return unless prune_configuration
 			raise ConfigurationError, "Relationship entry #{entry_index + 1} defines `prune` but did not expand to any relationships." if entry_members.empty?
 
 			member_kinds = entry_members.map(&:kind).uniq
@@ -266,6 +288,9 @@ class Configuration
 				raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot combine tree and normal relationships within one `prune` block."
 			end
 			if member_kinds.first == :tree
+				if prune_configuration.shortcut?
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot use `prune: <int>` on a tree relationship."
+				end
 				if prune_configuration.depth.nil?
 					raise ConfigurationError, "Relationship entry #{entry_index + 1} must define `prune.depth` when pruning a tree relationship."
 				end
@@ -285,6 +310,13 @@ class Configuration
 					tree_prune_rules << rule
 				end
 			end
+		end
+
+		# Adds one configured member to the prune group that should govern it.
+		def register_prune_member!(prune_members_by_configuration:, prune_configuration:, member:)
+			return unless prune_configuration
+
+			prune_members_by_configuration[prune_configuration] << member
 		end
 
 		# Expands one raw relationship entry into one or more prune rules.
@@ -373,27 +405,32 @@ class Configuration
 						{ 'collection' => collection.to_s.strip }
 					end
 				when Hash
-					[build_target_descriptor(target_entry)]
+					build_target_descriptors(target_entry)
 				else
 					raise ConfigurationError, '`to` entries must be strings or hashes.'
 				end
 			end
 		end
 
-		# Builds one explicit target descriptor while preserving whether optional
-		# keys were actually present in the source config.
-		def build_target_descriptor(target_entry)
-			descriptor = {
-				'collection' => Configuration::HashUtilities.fetch_hash_value(target_entry, 'collection').to_s.strip
-			}
+		# Builds one or more explicit target descriptors while preserving whether
+		# optional keys were actually present in the source config.
+		def build_target_descriptors(target_entry)
+			parse_collection_list(
+				value: Configuration::HashUtilities.fetch_hash_value(target_entry, 'collection'),
+				context: 'to.collection'
+			).map do |collection|
+				descriptor = {
+					'collection' => collection.to_s.strip
+				}
 
-			%w[frontmatter tree mode debug].each do |key|
-				next unless Configuration::HashUtilities.hash_key?(target_entry, key)
+				%w[frontmatter tree mode debug prune].each do |key|
+					next unless Configuration::HashUtilities.hash_key?(target_entry, key)
 
-				descriptor[key] = Configuration::HashUtilities.fetch_hash_value(target_entry, key)
+					descriptor[key] = Configuration::HashUtilities.fetch_hash_value(target_entry, key)
+				end
+
+				descriptor
 			end
-
-			descriptor
 		end
 
 		# Expands keyword targets such as `self`, `others`, and `all`.
@@ -429,7 +466,7 @@ class Configuration
 		def relationship_prune_setting(entry:, entry_index:)
 			return nil unless Configuration::HashUtilities.hash_key?(entry, 'prune')
 
-			Configuration::PruneRuleSettings.new(
+			Configuration::PruneRuleSettings.build(
 				raw_config: Configuration::HashUtilities.fetch_hash_value(entry, 'prune'),
 				context: "relationships.relationships[#{entry_index}].prune"
 			)
@@ -455,6 +492,29 @@ class Configuration
 				string_array: @string_array,
 				context: "relationships.relationships[#{entry_index}].to.debug"
 			)
+		end
+
+		# Resolves one optional per-target prune override.
+		def target_prune_setting(target:, entry_index:, cache:)
+			return nil unless target.key?('prune')
+
+			raw_config = target.fetch('prune')
+			return cache[raw_config.object_id] if cache.key?(raw_config.object_id)
+
+			cache[raw_config.object_id] = Configuration::PruneRuleSettings.build(
+				raw_config: raw_config,
+				context: "relationships.relationships[#{entry_index}].to.prune"
+			)
+		end
+
+		# Resolves the effective prune config for one expanded target.
+		#
+		# Targets may either inherit the relationship-level rule, replace it with a
+		# target-level rule, or explicitly disable it with `prune: false`.
+		def effective_prune_configuration(target_prune_configuration:, target_overrides_prune:, relationship_prune_configuration:)
+			return target_prune_configuration if target_overrides_prune
+
+			relationship_prune_configuration
 		end
 
 		# Builds the allowed parent-child collection directions for one tree mode.

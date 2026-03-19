@@ -346,6 +346,43 @@ RSpec.describe 'relationships configuration' do
 		])
 	end
 
+	it 'treats prune false as an explicit disable' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'products',
+						'to' => 'categories',
+						'prune' => false
+					}
+				]
+			}
+		)
+
+		expect(configuration.normal_prune_rules).to eq([])
+	end
+
+	it 'supports integer prune shorthand on normal relationships' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'products',
+						'to' => 'categories',
+						'prune' => 2
+					}
+				]
+			}
+		)
+
+		rule = configuration.normal_prune_rules.fetch(0)
+		expect(rule.subject_collection).to eq('products')
+		expect(rule.members.map(&:to_collection)).to eq(['categories'])
+		expect(rule.min).to eq(2)
+		expect(rule.depth).to be_nil
+		expect(rule.inverse?).to eq(false)
+	end
+
 	it 'rejects prune blocks that mix tree and normal relationships within one entry' do
 		expect do
 			Jekyll::Plugins::Relationships::Configuration.new(
@@ -403,6 +440,23 @@ RSpec.describe 'relationships configuration' do
 				}
 			)
 		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /must define `prune.depth` when pruning a tree relationship/i)
+	end
+
+	it 'rejects integer prune shorthand on tree relationships' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'categories',
+							'to' => 'self',
+							'mode' => 'parent',
+							'prune' => 1
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /cannot use `prune: <int>` on a tree relationship/i)
 	end
 
 	it 'rejects depth on normal prune rules' do
@@ -466,6 +520,127 @@ RSpec.describe 'relationships configuration' do
 		expect(rule.depth).to eq(-1)
 		expect(rule.inverse?).to eq(true)
 		expect(rule.min).to eq(2)
+	end
+
+	it 'expands comma-delimited hash-form target collections and applies target-level prune rules' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'projects',
+						'to' => [
+							{
+								'collection' => 'audiences, org_types, industries',
+								'prune' => {
+									'min' => 1
+								}
+							},
+							{
+								'collection' => 'clients',
+								'mode' => 'bidirectional',
+								'prune' => {
+									'mode' => 'inverse',
+									'min' => 1
+								}
+							}
+						]
+					}
+				]
+			}
+		)
+
+		expect(configuration.normal_relationship_for(from_collection: 'projects', to_collection: 'audiences')).not_to be_nil
+		expect(configuration.normal_relationship_for(from_collection: 'projects', to_collection: 'org_types')).not_to be_nil
+		expect(configuration.normal_relationship_for(from_collection: 'projects', to_collection: 'industries')).not_to be_nil
+		expect(configuration.normal_relationship_for(from_collection: 'projects', to_collection: 'clients')).not_to be_nil
+
+		expect(
+			configuration.normal_prune_rules.map do |rule|
+				[
+					rule.subject_collection,
+					rule.members.map(&:to_collection),
+					rule.min,
+					rule.inverse?
+				]
+			end
+		).to eq([
+			['clients', ['clients'], 1, true],
+			['projects', %w[audiences org_types industries], 1, false]
+		])
+	end
+
+	it 'lets target-level prune false disable relationship-level prune for that target only' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'projects',
+						'to' => [
+							'industries',
+							{
+								'collection' => 'clients',
+								'prune' => false
+							}
+						],
+						'prune' => {
+							'min' => 1
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.normal_prune_rules.map do |rule|
+				[
+					rule.subject_collection,
+					rule.members.map(&:to_collection),
+					rule.min,
+					rule.inverse?
+				]
+			end
+		).to eq([
+			['projects', ['industries'], 1, false]
+		])
+	end
+
+	it 'lets target-level prune override relationship-level prune for that target only' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'projects',
+						'to' => [
+							'industries',
+							{
+								'collection' => 'clients',
+								'prune' => {
+									'mode' => 'inverse',
+									'min' => 2
+								}
+							}
+						],
+						'prune' => {
+							'min' => 1
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.normal_prune_rules.map do |rule|
+				[
+					rule.subject_collection,
+					rule.members.map(&:to_collection),
+					rule.min,
+					rule.inverse?
+				]
+			end
+		).to eq([
+			['clients', ['clients'], 2, true],
+			['projects', ['industries'], 1, false]
+		])
 	end
 
 	it 'clamps prune iterations and normalises orphan mode aliases' do

@@ -171,7 +171,7 @@ class Engine
 	def log_relationship_summary(session:, normal_graph:, tree_graph:)
 		tree_graph_view = Pruning::TreePhase::TreeGraphView.new(tree_graph: tree_graph)
 		grouped_relationships = @configuration.configured_relationships.group_by(&:from_collection)
-		lines = grouped_relationships.keys.sort.map do |from_collection|
+		entries = grouped_relationships.keys.sort.map do |from_collection|
 			members = grouped_relationships.fetch(from_collection).sort_by(&:sequence)
 			source_documents = {}
 			target_documents = {}
@@ -195,10 +195,13 @@ class Engine
 				end
 			end
 
-			"#{from_collection} → #{members.map(&:to_collection).uniq.join(', ')} (#{source_documents.length} linked to #{target_documents.length})"
+			{
+				label: from_collection,
+				details: "→ #{members.map(&:to_collection).uniq.join(', ')} (#{source_documents.length} linked to #{target_documents.length})"
+			}
 		end
 		@run_logger.relationship_summary(
-			lines: lines,
+			entries: entries,
 			relationship_count: @configuration.configured_relationships.length
 		)
 	end

@@ -104,6 +104,53 @@ RSpec.describe 'tree relationships' do
 		end
 	end
 
+	it 'supports alternating cross-collection trees when the mode allows both collections to parent each other' do
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'sections', 'to' => 'pages', 'mode' => 'parent/child' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('sections', 'guides', {
+				'relationships' => {
+					'child' => 'pages/intro'
+				}
+			}),
+			collection_document('pages', 'intro', {
+				'relationships' => {
+					'child' => 'sections/setup'
+				}
+			}),
+			collection_document('sections', 'setup'),
+			collection_document('pages', 'checklist', {
+				'relationships' => {
+					'parent' => 'sections/setup'
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[sections pages], relationships: relationships, files: files) do |site, _files|
+			guides = document_for(site, 'sections', 'guides')
+			intro = document_for(site, 'pages', 'intro')
+			setup = document_for(site, 'sections', 'setup')
+			checklist = document_for(site, 'pages', 'checklist')
+
+			expect(reference_ids(guides.data.fetch('relationships').fetch('children'))).to eq(['pages/intro'])
+			expect(reference_ids(intro.data.fetch('relationships').fetch('parents'))).to eq(['sections/guides'])
+			expect(reference_ids(intro.data.fetch('relationships').fetch('children'))).to eq(['sections/setup'])
+			expect(reference_ids(setup.data.fetch('relationships').fetch('parents'))).to eq(['pages/intro'])
+			expect(reference_ids(setup.data.fetch('relationships').fetch('children'))).to eq(['pages/checklist'])
+			expect(reference_ids(checklist.data.fetch('relationships').fetch('parents'))).to eq(['sections/setup'])
+			expect(guides.data.fetch('relationships').fetch('descendants').map { |reference| [reference.fetch('id'), reference.fetch('distance')] }).to eq([
+				['sections/guides', 0],
+				['pages/intro', 1],
+				['sections/setup', 2],
+				['pages/checklist', 3]
+			])
+		end
+	end
+
 	it 'uses singular parent and child outputs when the configured maxima are one' do
 		relationships = {
 			'tree' => {
@@ -132,6 +179,43 @@ RSpec.describe 'tree relationships' do
 
 			expect(root.data.fetch('relationships').fetch('child').fetch('id')).to eq('categories/leaf')
 			expect(leaf.data.fetch('relationships').fetch('parent').fetch('id')).to eq('categories/root')
+		end
+	end
+
+	it 'ignores plural parent and child inputs when the configured maxima are one' do
+		relationships = {
+			'tree' => {
+				'max' => {
+					'parents' => 1,
+					'children' => 1
+				}
+			},
+			'relationships' => [
+				{ 'from' => 'categories', 'to' => 'self', 'mode' => 'parent' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('categories', 'root', {
+				'relationships' => {
+					'children' => ['categories/leaf']
+				}
+			}),
+			collection_document('categories', 'leaf', {
+				'relationships' => {
+					'parents' => ['categories/root']
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[categories], relationships: relationships, files: files) do |site, _files|
+			root = document_for(site, 'categories', 'root')
+			leaf = document_for(site, 'categories', 'leaf')
+
+			expect(root.data.fetch('relationships').fetch('child')).to be_nil
+			expect(leaf.data.fetch('relationships').fetch('parent')).to be_nil
+			expect(reference_ids(root.data.fetch('relationships').fetch('descendants'))).to eq(['categories/root'])
+			expect(reference_ids(leaf.data.fetch('relationships').fetch('ancestors'))).to eq(['categories/leaf'])
 		end
 	end
 
