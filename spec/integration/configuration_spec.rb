@@ -253,6 +253,239 @@ RSpec.describe 'relationships configuration' do
 		end
 	end
 
+	it 'builds combined direct prune rules by subject collection by default' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'products, services',
+						'to' => 'categories, tags',
+						'prune' => {
+							'min' => 2
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.normal_prune_rules.map do |rule|
+				[
+					rule.subject_collection,
+					rule.members.map(&:to_collection),
+					rule.min,
+					rule.inverse?
+				]
+			end
+		).to eq([
+			['products', %w[categories tags], 2, false],
+			['services', %w[categories tags], 2, false]
+		])
+	end
+
+	it 'builds combined inverse prune rules by target collection' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'projects, products',
+						'to' => 'categories, tags',
+						'prune' => {
+							'mode' => 'inverse',
+							'min' => 1
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.normal_prune_rules.map do |rule|
+				[
+					rule.subject_collection,
+					rule.members.map(&:from_collection),
+					rule.min,
+					rule.inverse?
+				]
+			end
+		).to eq([
+			['categories', %w[projects products], 1, true],
+			['tags', %w[projects products], 1, true]
+		])
+	end
+
+	it 'treats expanded prune members as separate rules when combine is false' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'prune' => {
+					'combine' => false
+				},
+				'relationships' => [
+					{
+						'from' => 'products',
+						'to' => 'categories, services',
+						'prune' => {
+							'min' => 1
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.normal_prune_rules.map do |rule|
+				[
+					rule.subject_collection,
+					rule.members.first.to_collection,
+					rule.min
+				]
+			end
+		).to eq([
+			['products', 'categories', 1],
+			['products', 'services', 1]
+		])
+	end
+
+	it 'rejects prune blocks that mix tree and normal relationships within one entry' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'pages',
+							'to' => [
+								'services',
+								{ 'collection' => 'sections', 'mode' => 'parent' }
+							],
+							'prune' => {
+								'min' => 1
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /cannot combine tree and normal relationships/i)
+	end
+
+	it 'rejects prune blocks with unsupported modes' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'products',
+							'to' => 'categories',
+							'prune' => {
+								'mode' => 'sideways',
+								'min' => 1
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /Unsupported `relationships.relationships\[0\].prune.mode` value/i)
+	end
+
+	it 'requires depth when pruning a tree relationship' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'categories',
+							'to' => 'self',
+							'mode' => 'parent',
+							'prune' => {
+								'min' => 1
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /must define `prune.depth` when pruning a tree relationship/i)
+	end
+
+	it 'rejects depth on normal prune rules' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'products',
+							'to' => 'categories',
+							'prune' => {
+								'min' => 1,
+								'depth' => 1
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /cannot define `prune.depth` on a normal relationship/i)
+	end
+
+	it 'rejects prune depth 0' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'categories',
+							'to' => 'self',
+							'mode' => 'parent',
+							'prune' => {
+								'min' => 1,
+								'depth' => 0
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /`relationships.relationships\[0\].prune.depth` cannot be 0/i)
+	end
+
+	it 'stores tree prune depth on parsed rules' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'categories',
+						'to' => 'self',
+						'mode' => 'parent',
+						'prune' => {
+							'mode' => 'inverse',
+							'min' => 2,
+							'depth' => -1
+						}
+					}
+				]
+			}
+		)
+
+		rule = configuration.tree_prune_rules.first
+		expect(rule.depth).to eq(-1)
+		expect(rule.inverse?).to eq(true)
+		expect(rule.min).to eq(2)
+	end
+
+	it 'clamps prune iterations and normalises orphan mode aliases' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'prune' => {
+					'iterations' => 999,
+					'tree' => {
+						'orphans' => 'grandparent required'
+					}
+				},
+				'relationships' => []
+			}
+		)
+
+		expect(configuration.prune_settings.iterations).to eq(100)
+		expect(configuration.prune_settings.prune_rounds).to eq(101)
+		expect(configuration.prune_settings.tree_orphans).to eq('grandparents required')
+	end
+
 	it 'requires an explicit <count> property when custom references are used in count mode' do
 		relationships = {
 			'multiple' => 'count',

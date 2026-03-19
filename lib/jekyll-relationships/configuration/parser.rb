@@ -13,13 +13,14 @@ class Configuration
 	# expansion, duplicate detection, and frontmatter override precedence.
 	class Parser
 		# Builds one parser for the current configuration.
-		def initialize(raw_config:, string_array:, global_debug:, global_frontmatter:, global_tree_settings:, keywords:)
+		def initialize(raw_config:, string_array:, global_debug:, global_frontmatter:, global_tree_settings:, keywords:, prune_settings:)
 			@raw_config = raw_config
 			@string_array = string_array
 			@global_debug = global_debug
 			@global_frontmatter = global_frontmatter
 			@global_tree_settings = global_tree_settings
 			@keywords = keywords
+			@prune_settings = prune_settings
 		end
 
 		# Parses the full relationship config into concrete definitions.
@@ -32,6 +33,10 @@ class Configuration
 			tree_relationships = []
 			collections = Set.new
 			occupancy = {}
+			configured_relationships = []
+			normal_prune_rules = []
+			tree_prune_rules = []
+			prune_rule_occupancy = Hash.new { |hash, key| hash[key] = [] }
 			sequence = 0
 
 			entries.each_with_index do |entry, entry_index|
@@ -51,6 +56,7 @@ class Configuration
 
 				relationship_frontmatter = Configuration::HashUtilities.fetch_hash_value(entry, 'frontmatter')
 				relationship_tree = Configuration::HashUtilities.fetch_hash_value(entry, 'tree')
+				prune_configuration = relationship_prune_setting(entry: entry, entry_index: entry_index)
 				relationship_debug = relationship_debug_setting(entry: entry, entry_index: entry_index)
 				relationship_mode = normalise_mode(Configuration::HashUtilities.fetch_hash_value(entry, 'mode'))
 				effective_relationship_frontmatter = @global_frontmatter.merge(relationship_frontmatter)
@@ -59,6 +65,7 @@ class Configuration
 					tree_override: relationship_tree
 				)
 				effective_relationship_debug = relationship_debug.nil? ? @global_debug : relationship_debug
+				entry_members = []
 
 				from_collections.each do |from_collection|
 					collections << from_collection
@@ -83,7 +90,7 @@ class Configuration
 							effective_debug = target_debug.nil? ? effective_relationship_debug : target_debug
 
 							if tree_mode?(effective_mode)
-								register_tree_relationship(
+								tree_definition = register_tree_relationship(
 									tree_relationships: tree_relationships,
 									occupancy: occupancy,
 									from_collection: from_collection,
@@ -94,9 +101,16 @@ class Configuration
 									debug: effective_debug,
 									sequence: sequence
 								)
+								configured_relationships << build_configured_relationship(
+									definition: tree_definition,
+									kind: :tree,
+									mode: effective_mode,
+									sequence: sequence
+								)
+								entry_members << configured_relationships.last
 								sequence += 1
 							else
-								sequence = register_normal_relationships(
+								registration = register_normal_relationships(
 									normal_relationships: normal_relationships,
 									occupancy: occupancy,
 									from_collection: from_collection,
@@ -106,16 +120,36 @@ class Configuration
 									debug: effective_debug,
 									sequence: sequence
 								)
+								configured_relationships << build_configured_relationship(
+									definition: registration.fetch(:definition),
+									kind: :normal,
+									mode: effective_mode,
+									sequence: sequence
+								)
+								entry_members << configured_relationships.last
+								sequence = registration.fetch(:sequence)
 							end
 						end
 					end
 				end
+
+				register_prune_rules!(
+					entry_members: entry_members,
+					prune_configuration: prune_configuration,
+					normal_prune_rules: normal_prune_rules,
+					tree_prune_rules: tree_prune_rules,
+					prune_rule_occupancy: prune_rule_occupancy,
+					entry_index: entry_index
+				)
 			end
 
 			{
 				normal_relationships: normal_relationships,
 				tree_relationships: tree_relationships,
-				collections: collections.to_a.sort
+				collections: collections.to_a.sort,
+				configured_relationships: configured_relationships,
+				normal_prune_rules: normal_prune_rules,
+				tree_prune_rules: tree_prune_rules
 			}
 		end
 
@@ -141,7 +175,7 @@ class Configuration
 		# Adds one concrete normal relationship pair.
 		def register_normal_relationships(normal_relationships:, occupancy:, from_collection:, to_collection:, mode:, frontmatter:, debug:, sequence:)
 			ensure_unoccupied_pair!(occupancy, from_collection, to_collection, "normal relationship #{from_collection} -> #{to_collection}")
-			normal_relationships[from_collection][to_collection] = build_normal_relationship(
+			forward_definition = build_normal_relationship(
 				from_collection: from_collection,
 				to_collection: to_collection,
 				frontmatter: frontmatter,
@@ -150,10 +184,14 @@ class Configuration
 				reads_frontmatter: true,
 				bidirectional: mode == 'bidirectional'
 			)
+			normal_relationships[from_collection][to_collection] = forward_definition
 			occupancy[[from_collection, to_collection]] = mode
 			sequence += 1
 
-			return sequence unless mode == 'bidirectional'
+			return {
+				sequence: sequence,
+				definition: forward_definition
+			} unless mode == 'bidirectional'
 
 			ensure_unoccupied_pair!(occupancy, to_collection, from_collection, "bidirectional reverse relationship #{to_collection} -> #{from_collection}")
 			normal_relationships[to_collection][from_collection] = build_normal_relationship(
@@ -166,7 +204,10 @@ class Configuration
 				bidirectional: true
 			)
 			occupancy[[to_collection, from_collection]] = mode
-			sequence + 1
+			{
+				sequence: sequence + 1,
+				definition: forward_definition
+			}
 		end
 
 		# Adds one concrete tree relationship definition.
@@ -174,7 +215,7 @@ class Configuration
 			ensure_unoccupied_pair!(occupancy, from_collection, to_collection, "tree relationship #{from_collection} <-> #{to_collection}")
 			ensure_unoccupied_pair!(occupancy, to_collection, from_collection, "tree relationship #{to_collection} <-> #{from_collection}") unless from_collection == to_collection
 
-			tree_relationships << Definitions::TreeRelationship.new(
+			definition = Definitions::TreeRelationship.new(
 				from_collection: from_collection,
 				to_collection: to_collection,
 				primary_path: frontmatter.primary_path,
@@ -183,9 +224,11 @@ class Configuration
 				debug: debug,
 				sequence: sequence
 			)
+			tree_relationships << definition
 
 			occupancy[[from_collection, to_collection]] = mode
 			occupancy[[to_collection, from_collection]] = mode
+			definition
 		end
 
 		# Builds one normal relationship definition.
@@ -201,6 +244,105 @@ class Configuration
 				reads_frontmatter: reads_frontmatter,
 				bidirectional: bidirectional
 			)
+		end
+
+		# Builds one forward-facing configured relationship member.
+		def build_configured_relationship(definition:, kind:, mode:, sequence:)
+			Definitions::ConfiguredRelationship.new(
+				definition: definition,
+				kind: kind,
+				mode: mode,
+				sequence: sequence
+			)
+		end
+
+		# Registers every prune rule produced by one raw relationship entry.
+		def register_prune_rules!(entry_members:, prune_configuration:, normal_prune_rules:, tree_prune_rules:, prune_rule_occupancy:, entry_index:)
+			return if prune_configuration.nil?
+			raise ConfigurationError, "Relationship entry #{entry_index + 1} defines `prune` but did not expand to any relationships." if entry_members.empty?
+
+			member_kinds = entry_members.map(&:kind).uniq
+			if member_kinds.length > 1
+				raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot combine tree and normal relationships within one `prune` block."
+			end
+			if member_kinds.first == :tree
+				if prune_configuration.depth.nil?
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} must define `prune.depth` when pruning a tree relationship."
+				end
+			elsif !prune_configuration.depth.nil?
+				raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot define `prune.depth` on a normal relationship."
+			end
+
+			prune_rules_for_entry(
+				entry_members: entry_members,
+				prune_configuration: prune_configuration,
+				entry_index: entry_index
+			).each do |rule|
+				ensure_unoccupied_prune_rule!(prune_rule_occupancy, rule)
+				if rule.normal?
+					normal_prune_rules << rule
+				else
+					tree_prune_rules << rule
+				end
+			end
+		end
+
+		# Expands one raw relationship entry into one or more prune rules.
+		def prune_rules_for_entry(entry_members:, prune_configuration:, entry_index:)
+			return expanded_prune_rules_for_entry(entry_members: entry_members, prune_configuration: prune_configuration, entry_index: entry_index) unless @prune_settings.combine?
+
+			grouped_members = if prune_configuration.inverse?
+									 entry_members.group_by(&:to_collection)
+								 else
+									 entry_members.group_by(&:from_collection)
+								 end
+			grouped_members.map do |subject_collection, members|
+				build_prune_rule(
+					subject_collection: subject_collection,
+					members: members,
+					prune_configuration: prune_configuration,
+					entry_index: entry_index
+				)
+			end
+		end
+
+		# Expands one raw relationship entry into one separate prune rule per member.
+		def expanded_prune_rules_for_entry(entry_members:, prune_configuration:, entry_index:)
+			entry_members.map do |member|
+				build_prune_rule(
+					subject_collection: prune_configuration.inverse? ? member.to_collection : member.from_collection,
+					members: [member],
+					prune_configuration: prune_configuration,
+					entry_index: entry_index
+				)
+			end
+		end
+
+		# Builds one concrete prune rule for one subject collection.
+		def build_prune_rule(subject_collection:, members:, prune_configuration:, entry_index:)
+			Definitions::PruneRule.new(
+				kind: members.first.kind,
+				subject_collection: subject_collection,
+				members: members,
+				min: prune_configuration.min,
+				depth: prune_configuration.depth,
+				inverse: prune_configuration.inverse?,
+				entry_index: entry_index
+			)
+		end
+
+		# Raises when two prune rules overlap on the same subject collection.
+		def ensure_unoccupied_prune_rule!(prune_rule_occupancy, rule)
+			occupancy_key = [rule.kind, rule.subject_collection]
+			existing_rules = prune_rule_occupancy[occupancy_key]
+			overlapping_rule = existing_rules.find do |existing_rule|
+				!(existing_rule.member_identifiers & rule.member_identifiers).empty?
+			end
+			if overlapping_rule
+				raise ConfigurationError, "Clashing prune rules target collection `#{rule.subject_collection}` more than once across overlapping #{rule.kind} relationships."
+			end
+
+			existing_rules << rule
 		end
 
 		# Parses one loose collection list into explicit collection labels.
@@ -281,6 +423,16 @@ class Configuration
 			return string_mode if %w[link bidirectional parent child parent/child child/parent].include?(string_mode)
 
 			raise ConfigurationError, "Unsupported relationship mode `#{mode}`."
+		end
+
+		# Resolves one optional per-relationship prune block.
+		def relationship_prune_setting(entry:, entry_index:)
+			return nil unless Configuration::HashUtilities.hash_key?(entry, 'prune')
+
+			Configuration::PruneRuleSettings.new(
+				raw_config: Configuration::HashUtilities.fetch_hash_value(entry, 'prune'),
+				context: "relationships.relationships[#{entry_index}].prune"
+			)
 		end
 
 		# Resolves one optional per-relationship debug override.

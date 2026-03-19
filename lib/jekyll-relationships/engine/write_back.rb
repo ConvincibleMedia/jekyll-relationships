@@ -26,7 +26,7 @@ class Engine
 				definitions = @configuration.normal_relationships_for(collection)
 				next if definitions.empty?
 
-				@registry.documents_for(collection).each do |document|
+				documents_for(collection).each do |document|
 					write_document_relationships(document: document, definitions: definitions)
 				end
 			end
@@ -80,8 +80,14 @@ class Engine
 				next if output_paths.key?(path)
 				next unless raw_state.present?
 
-				raw_state.write_upgraded_input!(registry: @registry)
-				value = raw_state.upgraded_raw_value(registry: @registry)
+				raw_state.write_upgraded_input!(
+					registry: @registry,
+					active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
+				)
+				value = raw_state.upgraded_raw_value(
+					registry: @registry,
+					active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
+				)
 				@engine.debug_logger.document_event(
 					document: document,
 					definitions: input_path_state.fetch(:definitions),
@@ -124,6 +130,20 @@ class Engine
 			end
 
 			accumulator.references
+		end
+
+		# Returns every document visible to the active engine or session.
+		def documents_for(collection)
+			return @engine.documents_for(collection) if @engine.respond_to?(:documents_for)
+
+			@registry.documents_for(collection)
+		end
+
+		# Returns true when one document is active in the current engine or session.
+		def active_document?(document)
+			return @engine.active_document?(document) if @engine.respond_to?(:active_document?)
+
+			true
 		end
 	end
 end

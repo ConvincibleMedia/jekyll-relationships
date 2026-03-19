@@ -7,6 +7,8 @@ require 'jekyll-relationships/configuration/debug_setting'
 require 'jekyll-relationships/configuration/hash_utilities'
 require 'jekyll-relationships/configuration/frontmatter'
 require 'jekyll-relationships/configuration/multiple_settings'
+require 'jekyll-relationships/configuration/prune_settings'
+require 'jekyll-relationships/configuration/prune_rule_settings'
 require 'jekyll-relationships/configuration/tree_frontmatter'
 require 'jekyll-relationships/configuration/tree_settings'
 require 'jekyll-relationships/configuration/parser'
@@ -21,7 +23,7 @@ module Relationships
 # The object resolves defaults once, exposes the final keyword and frontmatter
 # rules, and indexes the concrete relationship definitions used by the engine.
 class Configuration
-	attr_reader :keywords, :multiple_settings, :reference_template, :tree_settings, :global_frontmatter, :debug
+	attr_reader :keywords, :multiple_settings, :reference_template, :tree_settings, :global_frontmatter, :debug, :prune_settings
 
 	# Builds the full configuration model from `site.config`.
 	def initialize(site_config)
@@ -40,6 +42,9 @@ class Configuration
 		@keywords = build_keywords(Configuration::HashUtilities.fetch_hash_value(@raw_config, 'keywords'))
 		@multiple_settings = MultipleSettings.new(
 			raw_config: Configuration::HashUtilities.fetch_hash_value(@raw_config, 'multiple')
+		)
+		@prune_settings = PruneSettings.new(
+			raw_config: Configuration::HashUtilities.fetch_hash_value(@raw_config, 'prune')
 		)
 		@global_frontmatter = Frontmatter.new(
 			raw_config: Configuration::HashUtilities.merge_hash(
@@ -65,13 +70,17 @@ class Configuration
 			global_debug: @debug,
 			global_frontmatter: @global_frontmatter,
 			global_tree_settings: @tree_settings,
-			keywords: @keywords
+			keywords: @keywords,
+			prune_settings: @prune_settings
 		)
 
 		parsed_result = parsed_relationships.parse
 		@normal_relationships = parsed_result.fetch(:normal_relationships)
 		@tree_relationships = parsed_result.fetch(:tree_relationships)
 		@collections = parsed_result.fetch(:collections)
+		@configured_relationships = parsed_result.fetch(:configured_relationships)
+		@normal_prune_rules = parsed_result.fetch(:normal_prune_rules)
+		@tree_prune_rules = parsed_result.fetch(:tree_prune_rules)
 		attach_resolvers!(parser: parsed_relationships)
 	end
 
@@ -127,6 +136,7 @@ class Configuration
 		@debug = Configuration::DebugSetting.disabled
 		@keywords = build_keywords(nil)
 		@multiple_settings = MultipleSettings.new(raw_config: nil)
+		@prune_settings = PruneSettings.new(raw_config: nil)
 		@global_frontmatter = Frontmatter.new(
 			raw_config: Defaults::FRONTMATTER,
 			string_array: @string_array
@@ -139,6 +149,35 @@ class Configuration
 		@normal_relationships = {}
 		@tree_relationships = []
 		@collections = []
+		@configured_relationships = []
+		@normal_prune_rules = []
+		@tree_prune_rules = []
+	end
+
+	public
+
+	# Returns every configured forward-facing relationship member in sequence order.
+	def configured_relationships
+		@configured_relationships.sort_by(&:sequence)
+	end
+
+	# Returns every configured prune rule for normal relationships.
+	def normal_prune_rules
+		@normal_prune_rules.sort_by do |rule|
+			[rule.subject_collection, rule.entry_index, rule.members.first.sequence]
+		end
+	end
+
+	# Returns every configured prune rule for tree relationships.
+	def tree_prune_rules
+		@tree_prune_rules.sort_by do |rule|
+			[rule.subject_collection, rule.entry_index, rule.members.first.sequence]
+		end
+	end
+
+	# Returns true when any relationship entry defined a prune rule.
+	def pruning_enabled?
+		!@normal_prune_rules.empty? || !@tree_prune_rules.empty?
 	end
 
 	# Builds the active keyword table.

@@ -40,6 +40,13 @@ relationships:
       children: -1 # max children per item
     url: false # infer parent by item url
 
+  # Global pruning settings
+  prune: # see Pruning below
+    combine: true
+    iterations: 10
+    tree:
+      orphans: grandparents
+
   # What should happen to multiple links to the same thing?
   multiple: drop # see Multiple Links below
 
@@ -96,6 +103,7 @@ Each array item has:
   * `link` (default): `from` links to `to`.
   * `parent`/`child`: items in `from` can have items in `to` as their parent/child (which also implies the reverse relationship). See [Trees](#trees) below.
   * `bidirectional`: like `link`, but whenever a link is added, it is also added to the target in the reverse direction automatically.
+* `prune` (optional): remove documents whose finally-resolved relationship count for this entry is too low. See [Pruning](#pruning) below.
 
 Duplicate or clashing relationship definitions will throw an error. A bidirectional relationship "uses up" the reverse definition, so "from A to B, bidirectional" followed by a "from B to A, link/bidirectional" definition is a duplicate and throws an error.
 
@@ -397,9 +405,57 @@ references:
 ```
 
 
-## Recursive Resolution
+## Pruning
 
-Relationships are resolved recursively, while also guaranteeing that each relationship and document is resolved exactly once. E.g. if in order to resolve X we need the final state of Y, we recurse into Y and resolve it first.
+You can remove certain pages from your site ("prune" them) according to the number of finally-resolved relationships on them. This is controlled with a `prune` key which you add to the relationship definition:
+
+```yaml
+relationships:
+  # Normal relationship definitions
+  relationships:
+  - from: projects
+    to: categories, tags
+    prune:
+      min: 1 # prune a project if it links to fewer than 1 category/tag total
+  - from: products
+    to: categories
+    prune:
+      mode: inverse
+      min: 1 # prune a category if fewer than 1 products link to it
+  - from: categories
+    to: self
+    mode: parent
+    prune:
+      min: 2 # prune a category if it has fewer than 2 parents
+      depth: -1 # only prune non-root nodes
+  - from: products
+    to: self
+    mode: parent
+    prune:
+      mode: inverse
+      min: 2 # prune a product if it has fewer than 2 children
+      depth: 1 # only prune root notes
+  prune:
+    combine: true # default
+    iterations: 10 # default
+    tree:
+      orphans: grandparents # default
+```
+
+`prune` on each relationship entry allows:
+
+* `min` (required): the minimum number of related documents needed to survive.
+* `mode: inverse` (optional): prune the `to` side instead of the `from` side.
+* `depth` (required if pruning a tree): only for tree relationships, determines which tree nodes can be pruned:
+  * `1` selects roots, `2` would be roots and their chlidren, etc.
+  * `-1` and negative integers are the negation of their positive counterparts. So `-2` means all but the first two levels of the tree are eligible for pruning.
+
+If pruning removes a node from a tree, any children that lose all parents become orphans. `relationships.prune.tree.orphans` controls what happens:
+
+* `grandparents` (default): reconnect to the pruned node's original grandparents, if any.
+* `grandparents required`: as above, but also remove the orphan if there is no grandparent to connec to.
+* `prune`: prune all orphans recursively.
+* `orphan`: leave them parentless.
 
 
 ## Keywords

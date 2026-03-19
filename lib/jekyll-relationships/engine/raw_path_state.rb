@@ -127,31 +127,47 @@ class Engine
 		end
 
 		# Resolves every parsed entry for one primary-key scheme.
-		def resolved_entries_for(primary_path:, registry:)
+		def resolved_entries_for(primary_path:, registry:, active_document_checker: nil)
 			@preferred_primary_path ||= primary_path
 			@location_states.flat_map do |location_state|
 				location_state.resolved_entries_for(primary_path: primary_path) do |entry|
-					resolve_entry(entry: entry, primary_path: primary_path, registry: registry)
+					resolve_entry(
+						entry: entry,
+						primary_path: primary_path,
+						registry: registry,
+						active_document_checker: active_document_checker
+					)
 				end
 			end
 		end
 
 		# Builds the upgraded path value while preserving its concrete locations.
-		def upgraded_raw_value(registry:)
+		def upgraded_raw_value(registry:, active_document_checker: nil)
 			return nil unless present?
 
-			upgraded_values = upgraded_location_values(registry: registry)
+			upgraded_values = upgraded_location_values(
+				registry: registry,
+				active_document_checker: active_document_checker
+			)
 			return upgraded_values.first if upgraded_values.length == 1
 
 			upgraded_values
 		end
 
 		# Writes upgraded values back onto the exact matched locations.
-		def write_upgraded_input!(registry:)
-			upgraded_location_values(registry: registry)
+		def write_upgraded_input!(registry:, active_document_checker: nil)
+			upgraded_location_values(
+				registry: registry,
+				active_document_checker: active_document_checker
+			)
 			@location_states.each do |location_state|
 				location_state.write_upgraded_value(primary_path: @preferred_primary_path) do |entry|
-					resolve_entry(entry: entry, primary_path: @preferred_primary_path, registry: registry)
+					resolve_entry(
+						entry: entry,
+						primary_path: @preferred_primary_path,
+						registry: registry,
+						active_document_checker: active_document_checker
+					)
 				end
 			end
 		end
@@ -159,7 +175,7 @@ class Engine
 		private
 
 		# Resolves one parsed entry to a document and canonical key.
-		def resolve_entry(entry:, primary_path:, registry:)
+		def resolve_entry(entry:, primary_path:, registry:, active_document_checker:)
 			document = if entry.document?
 									 entry.page
 								 else
@@ -167,8 +183,9 @@ class Engine
 										 key: entry.key,
 										 primary_path: primary_path,
 										 collection: entry.collection.nil? ? nil : entry.collection.to_s
-									 )
-								 end
+										 )
+									 end
+			return nil if active_document_checker && !active_document_checker.call(document)
 
 			{
 				document: document,
@@ -179,10 +196,15 @@ class Engine
 		end
 
 		# Builds upgraded values for every concrete location under this raw path.
-		def upgraded_location_values(registry:)
+		def upgraded_location_values(registry:, active_document_checker:)
 			@location_states.map do |location_state|
 				location_state.upgraded_value(primary_path: @preferred_primary_path) do |entry|
-					resolve_entry(entry: entry, primary_path: @preferred_primary_path, registry: registry)
+					resolve_entry(
+						entry: entry,
+						primary_path: @preferred_primary_path,
+						registry: registry,
+						active_document_checker: active_document_checker
+					)
 				end
 			end
 		end

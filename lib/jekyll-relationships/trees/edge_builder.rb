@@ -51,7 +51,7 @@ class EdgeBuilder
 	def read_parent_references(definition:, parent_collection:, child_collection:)
 		path_configuration = definition.tree_settings.frontmatter
 
-		@registry.documents_for(child_collection).each do |child_document|
+		@graph.documents_for(child_collection).each do |child_document|
 			path_configuration.parent_input_paths.each do |path|
 				parse_references(@data_path.read(child_document.data, path)).each do |reference|
 					parent_document = resolve_reference(reference: reference, primary_path: definition.primary_path)
@@ -86,7 +86,7 @@ class EdgeBuilder
 	def read_child_references(definition:, parent_collection:, child_collection:)
 		path_configuration = definition.tree_settings.frontmatter
 
-		@registry.documents_for(parent_collection).each do |parent_document|
+		@graph.documents_for(parent_collection).each do |parent_document|
 			path_configuration.child_input_paths.each do |path|
 				parse_references(@data_path.read(parent_document.data, path)).each do |reference|
 					child_document = resolve_reference(reference: reference, primary_path: definition.primary_path)
@@ -124,7 +124,7 @@ class EdgeBuilder
 			next unless definition.tree_settings.url?
 
 			definition.parent_child_pairs.each do |parent_collection, child_collection|
-				@registry.documents_for(child_collection).each do |child_document|
+				@graph.documents_for(child_collection).each do |child_document|
 					parts = normalised_url_parts(child_document)
 					next if parts.length <= 1
 

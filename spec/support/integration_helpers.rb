@@ -103,6 +103,16 @@ module RelationshipsIntegrationHelpers
 		stub_const("Jekyll::Plugins::Relationships::Resolvers::#{name}", resolver_class)
 	end
 
+	# Captures default relationship logger output while one block runs.
+	def capture_relationship_logs
+		log_messages = []
+		allow(Jekyll.logger).to receive(:info) do |topic, message|
+			log_messages << message if topic == 'Relationships:'
+		end
+		yield
+		log_messages
+	end
+
 	private
 
 	# Normalises nil, singular, and array reference values into an array.

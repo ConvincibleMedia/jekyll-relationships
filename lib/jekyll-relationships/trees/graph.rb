@@ -14,14 +14,17 @@ module Trees
 # once normal relationship resolvers begin running.
 class Graph
 	# Builds one tree graph helper with the collaborators it needs.
-	def initialize(site:, configuration:, registry:, data_path:, debug_logger:)
+	def initialize(site:, configuration:, registry:, data_path:, debug_logger:, active_document_ids: nil)
 		@site = site
 		@configuration = configuration
 		@registry = registry
 		@data_path = data_path
 		@debug_logger = debug_logger
+		@active_document_ids = active_document_ids.nil? ? nil : active_document_ids.each_with_object({}) { |document_id, active_ids| active_ids[document_id] = true }
 		@parents = Hash.new { |hash, key| hash[key] = [] }
 		@children = Hash.new { |hash, key| hash[key] = [] }
+		@parent_edge_entries = Hash.new { |hash, key| hash[key] = [] }
+		@child_edge_entries = Hash.new { |hash, key| hash[key] = [] }
 		@ancestor_cache = {}
 		@descendant_cache = {}
 		@primary_path_by_collection = {}
@@ -50,20 +53,68 @@ class Graph
 		@tree_collections.include?(document.collection.label)
 	end
 
+	# Returns true when the document is active in this graph.
+	def active_document?(document)
+		return true if @active_document_ids.nil?
+
+		@active_document_ids.key?(document.object_id)
+	end
+
+	# Returns every active document for one collection.
+	def documents_for(collection)
+		@registry.documents_for(collection).select do |document|
+			active_document?(document)
+		end
+	end
+
 	# Returns immediate parents as canonical reference hashes.
 	def parents_for(document, primary_path: nil)
+		return [] unless active_document?(document)
+
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
 		@parents[document].map { |parent| build_reference(parent, primary_path: resolved_primary_path) }
 	end
 
 	# Returns immediate children as canonical reference hashes.
 	def children_for(document, primary_path: nil)
+		return [] unless active_document?(document)
+
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
 		@children[document].map { |child| build_reference(child, primary_path: resolved_primary_path) }
 	end
 
+	# Returns the immediate parent documents in deterministic insertion order.
+	def parent_documents_for(document)
+		return [] unless active_document?(document)
+
+		@parents[document].dup
+	end
+
+	# Returns the immediate child documents in deterministic insertion order.
+	def child_documents_for(document)
+		return [] unless active_document?(document)
+
+		@children[document].dup
+	end
+
+	# Returns metadata for each immediate parent edge in insertion order.
+	def parent_edge_entries_for(document)
+		return [] unless active_document?(document)
+
+		@parent_edge_entries[document].map(&:dup)
+	end
+
+	# Returns metadata for each immediate child edge in insertion order.
+	def child_edge_entries_for(document)
+		return [] unless active_document?(document)
+
+		@child_edge_entries[document].map(&:dup)
+	end
+
 	# Returns ancestor references filtered by minimum and maximum distance.
 	def ancestors_for(document, primary_path: nil, min: 0, max: -1)
+		return [] unless active_document?(document)
+
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
 		filter_distances(
 			distance_map_for(document: document, direction: :up),
@@ -75,6 +126,8 @@ class Graph
 
 	# Returns descendant references filtered by minimum and maximum distance.
 	def descendants_for(document, primary_path: nil, min: 0, max: -1)
+		return [] unless active_document?(document)
+
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
 		filter_distances(
 			distance_map_for(document: document, direction: :down),
@@ -86,6 +139,7 @@ class Graph
 
 	# Adds one parent-child edge unless it would break tree guarantees.
 	def add_edge(parent_document:, child_document:, tree_settings:, definition:, source_description:)
+		return unless active_document?(parent_document) && active_document?(child_document)
 		return if edge_exists?(parent_document: parent_document, child_document: child_document)
 
 		if parent_document == child_document
@@ -154,6 +208,18 @@ class Graph
 
 		@parents[child_document] << parent_document
 		@children[parent_document] << child_document
+		@parent_edge_entries[child_document] << build_edge_entry(
+			document: parent_document,
+			definition: definition,
+			tree_settings: tree_settings,
+			source_description: source_description
+		)
+		@child_edge_entries[parent_document] << build_edge_entry(
+			document: child_document,
+			definition: definition,
+			tree_settings: tree_settings,
+			source_description: source_description
+		)
 		clear_distance_cache
 		debug_tree_event(
 			document: child_document,
@@ -176,7 +242,7 @@ class Graph
 
 	# Returns every document participating in tree relationships.
 	def tree_documents
-		@tree_collections.to_a.flat_map { |collection| @registry.documents_for(collection) }.uniq
+		@tree_collections.to_a.flat_map { |collection| documents_for(collection) }.uniq
 	end
 
 	private
@@ -255,7 +321,7 @@ class Graph
 	# Returns the documents touched by one tree definition.
 	def definition_documents(definition)
 		[definition.from_collection, definition.to_collection].flat_map do |collection|
-			@registry.documents_for(collection)
+			documents_for(collection)
 		end.uniq
 	end
 
@@ -352,6 +418,16 @@ class Graph
 	def clear_distance_cache
 		@ancestor_cache.clear
 		@descendant_cache.clear
+	end
+
+	# Captures the metadata needed to understand one stored edge later on.
+	def build_edge_entry(document:, definition:, tree_settings:, source_description:)
+		{
+			document: document,
+			definition: definition,
+			tree_settings: tree_settings,
+			source_description: source_description
+		}
 	end
 
 	# Emits one Jekyll warning line for recoverable tree issues.

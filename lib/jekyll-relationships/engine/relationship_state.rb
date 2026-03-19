@@ -65,6 +65,17 @@ class Engine
 				primary_path: @definition.primary_path,
 				collection_hint: @definition.to_collection
 			)
+			unless @engine.active_document?(target_document)
+				debug('mutations', 'link', {
+					action: :inactive,
+					origin: origin,
+					target: target_document,
+					target_key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
+					count: count,
+					metadata: sanitised_metadata(metadata)
+				})
+				return
+			end
 			unless target_document.collection.label == @definition.to_collection
 				raise ResolutionError, "Resolver attempted to link `#{target_document.relative_path}` outside the allowed target collection `#{@definition.to_collection}`."
 			end
@@ -139,7 +150,11 @@ class Engine
 				})
 				next unless raw_state.present?
 
-				resolved_entries = raw_state.resolved_entries_for(primary_path: @definition.primary_path, registry: @engine.registry)
+				resolved_entries = raw_state.resolved_entries_for(
+					primary_path: @definition.primary_path,
+					registry: @engine.registry,
+					active_document_checker: proc { |resolved_document| @engine.active_document?(resolved_document) }
+				)
 				debug('upgrading', 'raw_path_resolved', {
 					path: path,
 					entries: resolved_entries.compact
