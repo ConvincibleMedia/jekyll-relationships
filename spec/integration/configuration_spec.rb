@@ -220,6 +220,7 @@ RSpec.describe 'relationships configuration' do
 
 	it 'supports custom reference template property names' do
 		relationships = {
+			'multiple' => 'count',
 			'references' => {
 				'slug' => '<key>',
 				'bucket' => '<collection>',
@@ -254,6 +255,7 @@ RSpec.describe 'relationships configuration' do
 
 	it 'requires an explicit <count> property when custom references are used in count mode' do
 		relationships = {
+			'multiple' => 'count',
 			'references' => {
 				'slug' => '<key>',
 				'bucket' => '<collection>',

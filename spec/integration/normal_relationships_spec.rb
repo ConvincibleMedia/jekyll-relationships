@@ -28,7 +28,7 @@ RSpec.describe 'normal relationships' do
 			expect(references.first.fetch('id')).to eq('categories/trainers')
 			expect(references.first.fetch('collection')).to eq('categories')
 			expect(references.first.fetch('page')).to eq(category)
-			expect(references.first.fetch('count')).to eq(1)
+			expect(references.first).not_to have_key('count')
 			expect(category.data.fetch('relationships', {})).not_to have_key('products')
 		end
 	end
@@ -136,6 +136,7 @@ RSpec.describe 'normal relationships' do
 		end
 
 		relationships = {
+			'multiple' => 'count',
 			'frontmatter' => {
 				'base' => 'data',
 				'foreign' => ['primary.<collection>', 'secondary']
@@ -227,7 +228,7 @@ RSpec.describe 'normal relationships' do
 				'categories/two',
 				'categories/extra'
 			])
-			expect(reference_values(data.fetch('resolved').fetch('categories'), 'count')).to eq([1, 1, 1])
+			expect(data.fetch('resolved').fetch('categories')).to all(satisfy { |reference| !reference.key?('count') })
 		end
 	end
 
@@ -364,12 +365,13 @@ RSpec.describe 'normal relationships' do
 			related = project.data.fetch('data').fetch('resolved').fetch('related')
 
 			expect(reference_ids(related)).to eq(['services/design', 'articles/launch-notes'])
-			expect(reference_values(related, 'count')).to eq([1, 1])
+			expect(related).to all(satisfy { |reference| !reference.key?('count') })
 		end
 	end
 
 	it 'supports explicit counts and merges duplicate metadata under the first occurrence' do
 		relationships = {
+			'multiple' => 'count',
 			'relationships' => [
 				{ 'from' => 'products', 'to' => 'categories' }
 			]
@@ -603,7 +605,7 @@ RSpec.describe 'normal relationships' do
 			expect(references[1].fetch('id')).to eq('services/strategy')
 			expect(references[1].fetch('collection')).to eq('services')
 			expect(references[1].fetch('page')).to be_a(Jekyll::Document)
-			expect(references.map { |reference| reference.fetch('count') }).to eq([1, 1])
+			expect(references).to all(satisfy { |reference| !reference.key?('count') })
 		end
 	end
 end

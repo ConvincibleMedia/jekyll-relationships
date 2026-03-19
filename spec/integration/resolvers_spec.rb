@@ -12,6 +12,7 @@ RSpec.describe 'relationship resolvers' do
 		end
 
 		relationships = {
+			'multiple' => 'count',
 			'relationships' => [
 				{ 'from' => 'projects', 'to' => 'services' }
 			]

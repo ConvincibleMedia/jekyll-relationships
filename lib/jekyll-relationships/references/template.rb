@@ -101,6 +101,14 @@ class Template
 		[@key_property, @collection_property, @page_property, @count_property].compact
 	end
 
+	# Returns the input properties that should never survive into free-form metadata.
+	#
+	# `count` is always treated as reserved input so resolver metadata cannot
+	# smuggle explicit multiplicities into modes that do not support them.
+	def reserved_input_properties
+		(reserved_properties + ['count']).uniq
+	end
+
 	private
 
 	# Validates and captures the configured placeholder mappings.
@@ -168,7 +176,7 @@ class Template
 		metadata = {}
 		hash.each do |property, value|
 			string_property = property.to_s
-			next if reserved_properties.include?(string_property)
+			next if reserved_input_properties.include?(string_property)
 
 			metadata[string_property] = value
 		end

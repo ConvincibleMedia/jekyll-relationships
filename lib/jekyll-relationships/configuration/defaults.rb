@@ -36,7 +36,7 @@ class Configuration
 		}.freeze
 
 		MULTIPLE = {
-			'mode' => 'count',
+			'mode' => 'drop',
 			'sort' => nil
 		}.freeze
 
