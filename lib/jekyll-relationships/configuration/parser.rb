@@ -76,6 +76,11 @@ class Configuration
 								frontmatter_override: target['frontmatter'],
 								tree_override: target['tree']
 							)
+							target_debug = target_debug_setting(
+								target: target,
+								entry_index: entry_index
+							)
+							effective_debug = target_debug.nil? ? effective_relationship_debug : target_debug
 
 							if tree_mode?(effective_mode)
 								register_tree_relationship(
@@ -86,7 +91,7 @@ class Configuration
 									mode: effective_mode,
 									frontmatter: effective_frontmatter,
 									tree_settings: effective_tree_settings,
-									debug: effective_relationship_debug,
+									debug: effective_debug,
 									sequence: sequence
 								)
 								sequence += 1
@@ -98,7 +103,7 @@ class Configuration
 									to_collection: to_collection,
 									mode: effective_mode,
 									frontmatter: effective_frontmatter,
-									debug: effective_relationship_debug,
+									debug: effective_debug,
 									sequence: sequence
 								)
 							end
@@ -240,7 +245,7 @@ class Configuration
 				'collection' => Configuration::HashUtilities.fetch_hash_value(target_entry, 'collection').to_s.strip
 			}
 
-			%w[frontmatter tree mode].each do |key|
+			%w[frontmatter tree mode debug].each do |key|
 				next unless Configuration::HashUtilities.hash_key?(target_entry, key)
 
 				descriptor[key] = Configuration::HashUtilities.fetch_hash_value(target_entry, key)
@@ -282,9 +287,21 @@ class Configuration
 		def relationship_debug_setting(entry:, entry_index:)
 			return nil unless Configuration::HashUtilities.hash_key?(entry, 'debug')
 
-			Configuration::HashUtilities.boolean_value(
-				Configuration::HashUtilities.fetch_hash_value(entry, 'debug'),
-				"relationships.relationships[#{entry_index}].debug"
+			Configuration::DebugSetting.build(
+				value: Configuration::HashUtilities.fetch_hash_value(entry, 'debug'),
+				string_array: @string_array,
+				context: "relationships.relationships[#{entry_index}].debug"
+			)
+		end
+
+		# Resolves one optional per-target debug override.
+		def target_debug_setting(target:, entry_index:)
+			return nil unless target.key?('debug')
+
+			Configuration::DebugSetting.build(
+				value: target.fetch('debug'),
+				string_array: @string_array,
+				context: "relationships.relationships[#{entry_index}].to.debug"
 			)
 		end
 

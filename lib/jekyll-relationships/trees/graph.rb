@@ -364,6 +364,7 @@ class Graph
 		@debug_logger.tree_event(
 			document: document,
 			definition: definition,
+			area: 'trees',
 			event: event,
 			details: details
 		)

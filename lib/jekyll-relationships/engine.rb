@@ -21,6 +21,8 @@ class Engine
 	def initialize(site:)
 		@site = site
 		@configuration = Configuration.new(@site.config)
+		return unless @configuration.enabled?
+
 		@debug_logger = DebugLogger.new
 		@registry = Documents::Registry.new(site: @site, collections: @configuration.collections)
 		@data_path = Jekyll::Plugins::Relationships::Support::DataPath.new
@@ -40,6 +42,7 @@ class Engine
 
 	# Processes the whole site.
 	def process!
+		return unless @configuration.enabled?
 		return if @configuration.collections.empty?
 
 		@registry.validate_collections!

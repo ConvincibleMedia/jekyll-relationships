@@ -9,6 +9,7 @@ class Configuration
 
 	# Holds the built-in configuration defaults used when the site omits them.
 	module Defaults
+		ENABLED = true
 		DEBUG = false
 
 		FRONTMATTER = {

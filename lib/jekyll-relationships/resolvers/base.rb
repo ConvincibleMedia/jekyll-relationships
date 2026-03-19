@@ -193,6 +193,7 @@ class Base
 		@engine.debug_logger.relationship_event(
 			document: @document,
 			definition: @state.definition,
+			area: 'resolvers',
 			event: event,
 			details: details
 		)

@@ -3,13 +3,56 @@
 require 'spec_helper'
 
 RSpec.describe 'relationships configuration' do
-	it 'allows relationship-level debug overrides to replace the global setting' do
+	it 'globally disables the plugin when relationships.enabled is false' do
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'services' => ['services/design']
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(
+			collections: %w[products services],
+			relationships: {
+				'enabled' => false,
+				'relationships' => [
+					{ 'from' => 'products', 'to' => 'services' }
+				]
+			},
+			files: files
+		) do |site, _files|
+			product = document_for(site, 'products', 'alpha')
+
+			expect(product.data.fetch('relationships').fetch('services')).to eq(['services/design'])
+		end
+	end
+
+	it 'skips relationship parsing entirely when relationships.enabled is false' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'enabled' => false,
+					'relationships' => 'not-an-array'
+				}
+			)
+		end.not_to raise_error
+	end
+
+	it 'supports debug area lists with relationship-level and target-level overrides' do
 		configuration = Jekyll::Plugins::Relationships::Configuration.new(
 			'relationships' => {
-				'debug' => true,
+				'debug' => 'resolution, upgrading',
 				'relationships' => [
-					{ 'from' => 'products', 'to' => 'categories', 'debug' => false },
-					{ 'from' => 'products', 'to' => 'services', 'debug' => true }
+					{
+						'from' => 'products',
+						'debug' => 'mutations',
+						'to' => [
+							{ 'collection' => 'categories', 'debug' => 'upgrading, resolvers' },
+							{ 'collection' => 'services' }
+						]
+					}
 				]
 			}
 		)
@@ -23,8 +66,14 @@ RSpec.describe 'relationships configuration' do
 			to_collection: 'services'
 		)
 
-		expect(categories_relationship.debug?).to eq(false)
-		expect(services_relationship.debug?).to eq(true)
+		expect(configuration.debug.enabled?('resolution')).to eq(true)
+		expect(configuration.debug.enabled?('upgrading')).to eq(true)
+		expect(configuration.debug.enabled?('mutations')).to eq(false)
+		expect(categories_relationship.debug?('upgrading')).to eq(true)
+		expect(categories_relationship.debug?('resolvers')).to eq(true)
+		expect(categories_relationship.debug?('mutations')).to eq(false)
+		expect(services_relationship.debug?('mutations')).to eq(true)
+		expect(services_relationship.debug?('upgrading')).to eq(false)
 	end
 
 	it 'supports overridden keywords for self relationships while collection placeholders stay literal' do

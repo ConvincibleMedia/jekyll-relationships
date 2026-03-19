@@ -61,6 +61,7 @@ class EdgeBuilder
 					@debug_logger.tree_event(
 						document: child_document,
 						definition: definition,
+						area: 'trees',
 						event: 'tree_reference_resolved',
 						details: {
 							source: "frontmatter #{path}",
@@ -95,6 +96,7 @@ class EdgeBuilder
 					@debug_logger.tree_event(
 						document: parent_document,
 						definition: definition,
+						area: 'trees',
 						event: 'tree_reference_resolved',
 						details: {
 							source: "frontmatter #{path}",

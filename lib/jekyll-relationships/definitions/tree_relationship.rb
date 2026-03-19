@@ -31,8 +31,8 @@ class TreeRelationship
 	end
 
 	# Returns true when extra debug logging should be emitted for this definition.
-	def debug?
-		@debug
+	def debug?(area = nil)
+		@debug.enabled?(area)
 	end
 
 	# Returns true when one parent-child direction is permitted.

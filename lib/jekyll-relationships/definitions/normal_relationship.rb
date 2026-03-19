@@ -34,8 +34,8 @@ class NormalRelationship
 	end
 
 	# Returns true when extra debug logging should be emitted for this pair.
-	def debug?
-		@debug
+	def debug?(area = nil)
+		@debug.enabled?(area)
 	end
 
 	# Registers one resolver class against this relationship pair.

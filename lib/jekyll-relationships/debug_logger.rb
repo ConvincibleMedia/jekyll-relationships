@@ -13,21 +13,23 @@ class DebugLogger
 	MAX_VALUE_LENGTH = 500
 
 	# Emits one debug line for one normal relationship state.
-	def relationship_event(document:, definition:, event:, details: {})
-		return unless definition.debug?
+	def relationship_event(document:, definition:, area:, event:, details: {})
+		return unless definition.debug?(area)
 
 		log(
+			area: area,
 			prefix: "#{document.relative_path} (#{definition.from_collection} -> #{definition.to_collection}) #{event}",
 			details: details
 		)
 	end
 
 	# Emits one debug line for a document-level write-back event.
-	def document_event(document:, definitions:, event:, details: {})
-		debug_definitions = Array(definitions).select(&:debug?)
+	def document_event(document:, definitions:, area:, event:, details: {})
+		debug_definitions = Array(definitions).select { |definition| definition.debug?(area) }
 		return if debug_definitions.empty?
 
 		log(
+			area: area,
 			prefix: "#{document.relative_path} #{event}",
 			details: details.merge(
 				relationships: debug_definitions.map do |definition|
@@ -38,10 +40,11 @@ class DebugLogger
 	end
 
 	# Emits one debug line for one tree relationship event.
-	def tree_event(document:, definition:, event:, details: {})
-		return unless definition.debug?
+	def tree_event(document:, definition:, area:, event:, details: {})
+		return unless definition.debug?(area)
 
 		log(
+			area: area,
 			prefix: "#{document.relative_path} (tree #{definition.from_collection} <-> #{definition.to_collection}) #{event}",
 			details: details
 		)
@@ -60,13 +63,13 @@ class DebugLogger
 	private
 
 	# Emits one line through the standard Jekyll logger.
-	def log(prefix:, details:)
+	def log(area:, prefix:, details:)
 		detail_text = details.each_with_object([]) do |(key, value), parts|
 			parts << "#{key}=#{format_value(value)}"
 		end.join(' ')
 
 		message = detail_text.empty? ? prefix : "#{prefix} #{detail_text}"
-		Jekyll.logger.info('Relationships:', "[debug] #{message}")
+		Jekyll.logger.info('Relationships:', "[debug:#{area}] #{message}")
 	end
 
 	# Normalises values so large document objects stay readable in logs.

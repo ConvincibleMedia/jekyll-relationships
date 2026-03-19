@@ -61,6 +61,7 @@ class Engine
 				@engine.debug_logger.document_event(
 					document: document,
 					definitions: states.map(&:definition),
+					area: 'upgrading',
 					event: 'write_output',
 					details: {
 						path: path,
@@ -79,6 +80,7 @@ class Engine
 				@engine.debug_logger.document_event(
 					document: document,
 					definitions: input_path_state.fetch(:definitions),
+					area: 'upgrading',
 					event: 'upgrade_input',
 					details: {
 						path: path,

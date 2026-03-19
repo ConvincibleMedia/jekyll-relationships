@@ -3,6 +3,7 @@
 require 'jekyll-relationships/definitions/normal_relationship'
 require 'jekyll-relationships/definitions/tree_relationship'
 require 'jekyll-relationships/configuration/defaults'
+require 'jekyll-relationships/configuration/debug_setting'
 require 'jekyll-relationships/configuration/hash_utilities'
 require 'jekyll-relationships/configuration/frontmatter'
 require 'jekyll-relationships/configuration/multiple_settings'
@@ -26,6 +27,13 @@ class Configuration
 	def initialize(site_config)
 		@string_array = Jekyll::Plugins::Relationships::Support::StringArray.new
 		@raw_config = Configuration::HashUtilities.fetch_hash_value(site_config, 'relationships') || {}
+		@enabled = build_enabled_setting
+
+		if !enabled?
+			initialise_disabled_configuration
+			return
+		end
+
 		@debug = build_debug_setting
 		global_frontmatter_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'frontmatter')
 		global_tree_override = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'tree')
@@ -67,6 +75,11 @@ class Configuration
 		attach_resolvers!(parser: parsed_relationships)
 	end
 
+	# Returns true when relationship processing is globally enabled.
+	def enabled?
+		@enabled
+	end
+
 	# Returns the concrete normal relationship definition for one pair.
 	def normal_relationship_for(from_collection:, to_collection:)
 		collection_relationships = @normal_relationships[from_collection]
@@ -99,6 +112,35 @@ class Configuration
 
 	private
 
+	# Builds the active global enabled setting.
+	def build_enabled_setting
+		return Defaults::ENABLED unless Configuration::HashUtilities.hash_key?(@raw_config, 'enabled')
+
+		Configuration::HashUtilities.boolean_value(
+			Configuration::HashUtilities.fetch_hash_value(@raw_config, 'enabled'),
+			'relationships.enabled'
+		)
+	end
+
+	# Sets up the inert configuration used when the plugin is globally disabled.
+	def initialise_disabled_configuration
+		@debug = Configuration::DebugSetting.disabled
+		@keywords = build_keywords(nil)
+		@multiple_settings = MultipleSettings.new(raw_config: nil)
+		@global_frontmatter = Frontmatter.new(
+			raw_config: Defaults::FRONTMATTER,
+			string_array: @string_array
+		)
+		@reference_template = References::Template.new(
+			config: default_reference_config,
+			count_enabled: @multiple_settings.count?
+		)
+		@tree_settings = TreeSettings.defaults(string_array: @string_array)
+		@normal_relationships = {}
+		@tree_relationships = []
+		@collections = []
+	end
+
 	# Builds the active keyword table.
 	def build_keywords(raw_keywords)
 		Configuration::HashUtilities.merge_hash(Defaults::KEYWORDS, raw_keywords)
@@ -106,24 +148,16 @@ class Configuration
 
 	# Builds the active global debug setting.
 	def build_debug_setting
-		return Defaults::DEBUG unless Configuration::HashUtilities.hash_key?(@raw_config, 'debug')
-
-		Configuration::HashUtilities.boolean_value(
-			Configuration::HashUtilities.fetch_hash_value(@raw_config, 'debug'),
-			'relationships.debug'
+		Configuration::DebugSetting.build(
+			value: Configuration::HashUtilities.hash_key?(@raw_config, 'debug') ? Configuration::HashUtilities.fetch_hash_value(@raw_config, 'debug') : Defaults::DEBUG,
+			string_array: @string_array,
+			context: 'relationships.debug'
 		)
 	end
 
 	# Builds the resolved reference template config.
 	def build_reference_config
-		default_references = {
-			'id' => Jekyll::Plugins::Relationships::Support::Placeholders::KEY,
-			'collection' => Jekyll::Plugins::Relationships::Support::Placeholders::COLLECTION,
-			'page' => Jekyll::Plugins::Relationships::Support::Placeholders::PAGE
-		}
-		if @multiple_settings.count?
-			default_references['count'] = Jekyll::Plugins::Relationships::Support::Placeholders::COUNT
-		end
+		default_references = default_reference_config
 		explicit_config = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'references')
 		return explicit_config if explicit_config.is_a?(Hash)
 
@@ -133,6 +167,20 @@ class Configuration
 		)
 		if nested_frontmatter.is_a?(Hash)
 			raise ConfigurationError, '`relationships.references` must be configured directly under `relationships`, not under `relationships.frontmatter`.'
+		end
+
+		default_references
+	end
+
+	# Builds the default reference template shape for the active duplicate mode.
+	def default_reference_config
+		default_references = {
+			'id' => Jekyll::Plugins::Relationships::Support::Placeholders::KEY,
+			'collection' => Jekyll::Plugins::Relationships::Support::Placeholders::COLLECTION,
+			'page' => Jekyll::Plugins::Relationships::Support::Placeholders::PAGE
+		}
+		if @multiple_settings.count?
+			default_references['count'] = Jekyll::Plugins::Relationships::Support::Placeholders::COUNT
 		end
 
 		default_references

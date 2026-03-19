@@ -43,7 +43,7 @@ class Engine
 			raise ResolutionError, "Cyclic relationship resolution detected while resolving #{description}." if resolving?
 
 			@status = :resolving
-			debug('resolve_start', {
+			debug('resolution', 'resolve_start', {
 				input_paths: @definition.foreign_paths,
 				output_path: @definition.final_output_path,
 				reads_frontmatter: @definition.reads_frontmatter,
@@ -53,7 +53,7 @@ class Engine
 			seed_raw_links!
 			run_resolvers!
 			@status = :resolved
-			debug('resolve_finish', {
+			debug('resolution', 'resolve_finish', {
 				references: current_references
 			})
 		end
@@ -75,7 +75,7 @@ class Engine
 				metadata: sanitised_metadata(metadata),
 				count: count
 			)
-			debug('link', {
+			debug('mutations', 'link', {
 				action: action,
 				origin: origin,
 				target: target_document,
@@ -93,7 +93,7 @@ class Engine
 		def unlink(reference = nil, reflect: true, origin: 'resolver')
 			if reference.nil?
 				if current_link_entries.empty?
-					debug('unlink_all', {
+					debug('mutations', 'unlink_all', {
 						action: :missing,
 						origin: origin
 					})
@@ -132,7 +132,7 @@ class Engine
 
 			@definition.foreign_paths.each do |path|
 				raw_state = @engine.raw_path_state(@document, path)
-				debug('raw_path', {
+				debug('upgrading', 'raw_path', {
 					path: path,
 					present: raw_state.present?,
 					value: raw_state.raw_value
@@ -140,7 +140,7 @@ class Engine
 				next unless raw_state.present?
 
 				resolved_entries = raw_state.resolved_entries_for(primary_path: @definition.primary_path, registry: @engine.registry)
-				debug('raw_path_resolved', {
+				debug('upgrading', 'raw_path_resolved', {
 					path: path,
 					entries: resolved_entries.compact
 				})
@@ -148,7 +148,7 @@ class Engine
 				resolved_entries.each do |entry|
 					next unless entry
 					if entry.fetch(:document).collection.label != @definition.to_collection
-						debug('raw_path_skipped', {
+						debug('upgrading', 'raw_path_skipped', {
 							path: path,
 							target: entry.fetch(:document),
 							target_key: entry.fetch(:key),
@@ -174,11 +174,11 @@ class Engine
 		# Instantiates and runs every configured resolver class.
 		def run_resolvers!
 			@definition.resolver_classes.each do |resolver_class|
-				debug('resolver_start', {
+				debug('resolvers', 'resolver_start', {
 					resolver: @engine.debug_logger.resolver_name(resolver_class)
 				})
 				resolver_class.new(engine: @engine, state: self).resolve
-				debug('resolver_finish', {
+				debug('resolvers', 'resolver_finish', {
 					resolver: @engine.debug_logger.resolver_name(resolver_class),
 					references: current_references
 				})
@@ -188,7 +188,7 @@ class Engine
 		# Removes one stored document and mirrors the removal if needed.
 		def remove_document(document:, reflect:, origin:)
 			action = @links.remove_result(document: document)
-			debug('unlink', {
+			debug('mutations', 'unlink', {
 				action: action,
 				origin: origin,
 				target: document,
@@ -218,10 +218,11 @@ class Engine
 		end
 
 		# Emits one debug event for this state when the definition enables it.
-		def debug(event, details)
+		def debug(area, event, details)
 			@engine.debug_logger.relationship_event(
 				document: @document,
 				definition: @definition,
+				area: area,
 				event: event,
 				details: details
 			)

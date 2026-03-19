@@ -62,7 +62,7 @@ RSpec.describe 'normal relationships' do
 		debug_messages = []
 		allow(Jekyll.logger).to receive(:info) do |topic, message|
 			next unless topic == 'Relationships:'
-			next unless message.include?('[debug]')
+			next unless message.include?('[debug:')
 
 			debug_messages << message
 		end
@@ -71,17 +71,61 @@ RSpec.describe 'normal relationships' do
 			nil
 		end
 
-		expect(debug_messages).to include(a_string_including('_products/alpha.md (products -> categories) resolve_start'))
-		expect(debug_messages).to include(a_string_including('_products/alpha.md (products -> categories) raw_path'))
+		expect(debug_messages).to include(a_string_including('[debug:resolution] _products/alpha.md (products -> categories) resolve_start'))
+		expect(debug_messages).to include(a_string_including('[debug:upgrading] _products/alpha.md (products -> categories) raw_path'))
 		expect(debug_messages).to include(a_string_including('value=["categories/one"]'))
-		expect(debug_messages).to include(a_string_including('_products/alpha.md (products -> categories) resolver_start'))
+		expect(debug_messages).to include(a_string_including('[debug:resolvers] _products/alpha.md (products -> categories) resolver_start'))
 		expect(debug_messages).to include(a_string_including('resolver="Jekyll::Plugins::Relationships::Resolvers::DebugTraceResolver"'))
-		expect(debug_messages).to include(a_string_including('_products/alpha.md (products -> categories) resolver_relationships'))
-		expect(debug_messages).to include(a_string_including('_products/alpha.md (products -> categories) link'))
+		expect(debug_messages).to include(a_string_including('[debug:resolvers] _products/alpha.md (products -> categories) resolver_relationships'))
+		expect(debug_messages).to include(a_string_including('[debug:mutations] _products/alpha.md (products -> categories) link'))
 		expect(debug_messages).to include(a_string_including('origin="resolver Jekyll::Plugins::Relationships::Resolvers::DebugTraceResolver"'))
 		expect(debug_messages).to include(a_string_including('target_key="categories/extra"'))
-		expect(debug_messages).to include(a_string_including('_products/alpha.md write_output'))
+		expect(debug_messages).to include(a_string_including('[debug:upgrading] _products/alpha.md write_output'))
 		expect(debug_messages).to include(a_string_including('path="relationships.categories"'))
+	end
+
+	it 'filters debug logs down to the requested areas when debug is configured as a string list' do
+		define_resolver('UpgradingOnlyDebugTraceResolver', from: 'products', to: 'categories') do
+			def resolve
+				relationships
+				link('categories/extra')
+			end
+		end
+
+		relationships = {
+			'debug' => 'upgrading',
+			'relationships' => [
+				{ 'from' => 'products', 'to' => 'categories' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'categories' => ['categories/one']
+				}
+			}),
+			collection_document('categories', 'one'),
+			collection_document('categories', 'extra')
+		)
+
+		debug_messages = []
+		allow(Jekyll.logger).to receive(:info) do |topic, message|
+			next unless topic == 'Relationships:'
+			next unless message.include?('[debug:')
+
+			debug_messages << message
+		end
+
+		build_relationship_site(collections: %w[products categories], relationships: relationships, files: files) do |_site, _files|
+			nil
+		end
+
+		expect(debug_messages).to include(a_string_including('[debug:upgrading]'))
+		expect(debug_messages).not_to include(a_string_including('[debug:resolution]'))
+		expect(debug_messages).not_to include(a_string_including('[debug:mutations]'))
+		expect(debug_messages).not_to include(a_string_including('[debug:resolvers]'))
+		expect(debug_messages).to include(a_string_including('write_output'))
 	end
 
 	it 'counts duplicate links gathered from multiple input paths and rewrites the final set onto the first path' do
