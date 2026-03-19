@@ -232,6 +232,205 @@ RSpec.describe 'normal relationships' do
 		end
 	end
 
+	it 'upgrades array-expanded raw references surgically while writing consolidated output elsewhere' do
+		define_resolver('ArrayExpandedProjectAdder', from: 'projects', to: 'projects') do
+			def resolve
+				link('project-gamma', reference: { 'source' => 'resolver' })
+			end
+		end
+
+		relationships = {
+			'frontmatter' => {
+				'base' => 'data',
+				'primary' => 'id'
+			},
+			'relationships' => [
+				{
+					'from' => 'projects',
+					'to' => [
+						{
+							'collection' => 'projects',
+							'frontmatter' => {
+								'foreign' => 'body.imagery.project',
+								'output' => 'resolved.projects'
+							}
+						}
+					]
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'data' => {
+					'id' => 'project-alpha',
+					'body' => [
+						{
+							'block_type' => 'imagery',
+							'imagery' => {
+								'project' => {
+									'id' => 'project-beta',
+									'caption' => 'hero'
+								}
+							}
+						},
+						{
+							'block_type' => 'imagery',
+							'layout' => {
+								'variant' => 'wide'
+							},
+							'imagery' => {
+								'project' => {
+									'id' => 'project-delta',
+									'caption' => 'support'
+								}
+							}
+						},
+						{
+							'block_type' => 'text',
+							'content' => 'Keep me intact'
+						}
+					]
+				}
+			}),
+			collection_document('projects', 'beta', {
+				'data' => { 'id' => 'project-beta' }
+			}),
+			collection_document('projects', 'delta', {
+				'data' => { 'id' => 'project-delta' }
+			}),
+			collection_document('projects', 'gamma', {
+				'data' => { 'id' => 'project-gamma' }
+			})
+		)
+
+		build_relationship_site(collections: %w[projects], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			body = project.data.fetch('data').fetch('body')
+			first_project = body[0].fetch('imagery').fetch('project')
+			second_project = body[1].fetch('imagery').fetch('project')
+			resolved_projects = project.data.fetch('data').fetch('resolved').fetch('projects')
+
+			expect(reference_ids(first_project)).to eq(['project-beta'])
+			expect(reference_ids(second_project)).to eq(['project-delta'])
+			expect(first_project.fetch('caption')).to eq('hero')
+			expect(second_project.fetch('caption')).to eq('support')
+			expect(first_project.fetch('collection')).to eq('projects')
+			expect(second_project.fetch('collection')).to eq('projects')
+			expect(body[1].fetch('layout')).to eq({ 'variant' => 'wide' })
+			expect(body[2]).to eq({
+				'block_type' => 'text',
+				'content' => 'Keep me intact'
+			})
+			expect(reference_ids(resolved_projects)).to eq([
+				'project-beta',
+				'project-delta',
+				'project-gamma'
+			])
+			expect(resolved_projects.last.fetch('source')).to eq('resolver')
+		end
+	end
+
+	it 'requires a separate output path when the default consolidated write target spans an array' do
+		relationships = {
+			'frontmatter' => {
+				'base' => 'data',
+				'primary' => 'id',
+				'foreign' => 'body.imagery.project'
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'projects' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'data' => {
+					'id' => 'project-alpha',
+					'body' => [
+						{
+							'imagery' => {
+								'project' => 'project-beta'
+							}
+						}
+					]
+				}
+			}),
+			collection_document('projects', 'beta', {
+				'data' => { 'id' => 'project-beta' }
+			})
+		)
+
+		expect do
+			build_relationship_site(collections: %w[projects], relationships: relationships, files: files) { |_site, _files| nil }
+		end.to raise_error(
+			JekyllTestHarness::SiteBuildError,
+			/spans across an array.*frontmatter\.output/i
+		)
+	end
+
+	it 'allows array-expanded input paths when the consolidated write target remains a simple path' do
+		define_resolver('PrimaryPathProjectAdder', from: 'projects', to: 'projects') do
+			def resolve
+				link('project-gamma')
+			end
+		end
+
+		relationships = {
+			'frontmatter' => {
+				'base' => 'data',
+				'primary' => 'id',
+				'foreign' => ['primary_projects', 'body.imagery.project']
+			},
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'projects' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'data' => {
+					'id' => 'project-alpha',
+					'primary_projects' => ['project-beta'],
+					'body' => [
+						{
+							'imagery' => {
+								'project' => {
+									'id' => 'project-delta',
+									'caption' => 'body block'
+								}
+							}
+						}
+					]
+				}
+			}),
+			collection_document('projects', 'beta', {
+				'data' => { 'id' => 'project-beta' }
+			}),
+			collection_document('projects', 'delta', {
+				'data' => { 'id' => 'project-delta' }
+			}),
+			collection_document('projects', 'gamma', {
+				'data' => { 'id' => 'project-gamma' }
+			})
+		)
+
+		build_relationship_site(collections: %w[projects], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+			data = project.data.fetch('data')
+			body_project = data.fetch('body').first.fetch('imagery').fetch('project')
+
+			expect(reference_ids(data.fetch('primary_projects'))).to eq([
+				'project-beta',
+				'project-delta',
+				'project-gamma'
+			])
+			expect(reference_ids(body_project)).to eq(['project-delta'])
+			expect(body_project.fetch('caption')).to eq('body block')
+			expect(body_project.fetch('collection')).to eq('projects')
+		end
+	end
+
 	it 'resolves collection placeholders in separate output paths' do
 		relationships = {
 			'frontmatter' => {

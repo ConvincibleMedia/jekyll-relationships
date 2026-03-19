@@ -137,7 +137,7 @@ frontmatter:
 
 ### Output
 
-Relationships are read from the keys you give, and processed. Processing may modify the relationships, add/removing some. This will be written back into the frontmatter at the first location defined in `foreign`. However, if you want to leave this alone, a separate key `output` gives the frontmatter location where you want the final set of relationships to be written. It may contain `<collection>`. Example:
+Relationships are read from the keys you give, and processed. Processing may modify the relationships, add/removing some. This will be written back into the frontmatter at the first location defined in `foreign`. However, if you want to leave this alone, or if the foreign location spans across an array and so can't be written back to, a separate key `output` gives the frontmatter location where you want the final set of relationships to be written. It may contain `<collection>`. Example:
 
 ```yaml
 relationships:

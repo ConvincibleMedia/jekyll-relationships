@@ -56,6 +56,11 @@ class Engine
 			end
 
 			output_paths.each do |path, states|
+				ensure_output_path_can_receive_consolidated_links!(
+					document: document,
+					path: path,
+					definitions: states.map(&:definition)
+				)
 				value = merged_output_value(states)
 				@data_path.write(document.data, path, value)
 				@engine.debug_logger.document_event(
@@ -75,8 +80,8 @@ class Engine
 				next if output_paths.key?(path)
 				next unless raw_state.present?
 
-				value = raw_state.upgraded_value(registry: @registry)
-				@data_path.write(document.data, path, value)
+				raw_state.write_upgraded_input!(registry: @registry)
+				value = raw_state.upgraded_raw_value(registry: @registry)
 				@engine.debug_logger.document_event(
 					document: document,
 					definitions: input_path_state.fetch(:definitions),
@@ -88,6 +93,17 @@ class Engine
 					}
 				)
 			end
+		end
+
+		# Rejects any consolidated output path that expands through arrays.
+		def ensure_output_path_can_receive_consolidated_links!(document:, path:, definitions:)
+			path_state = @data_path.read_result(document.data, path)
+			return unless path_state.array_traversed?
+
+			relationship_descriptions = definitions.uniq.map do |definition|
+				"#{definition.from_collection} -> #{definition.to_collection}"
+			end.join(', ')
+			raise ResolutionError, "Cannot write consolidated relationships for `#{document.relative_path}` to frontmatter path `#{path}` because that path spans across an array. Configure `frontmatter.output` to a separate hash path for #{relationship_descriptions}."
 		end
 
 		# Merges one or more pair states into one final output array.
