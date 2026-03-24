@@ -2,8 +2,8 @@
 
 module Jekyll
 module Plugins
-
 module Relationships
+
 module Support
 	module_function
 
@@ -56,8 +56,8 @@ module Support
 			stringified[key.to_s] = value
 		end
 	end
-end
 
+end
 end
 end
 end

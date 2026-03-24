@@ -9,8 +9,8 @@ Gem::Specification.new do |spec|
 	spec.authors = ['Convincible']
 	spec.email = ['development@convincible.media']
 
-	spec.summary = 'Many-to-many relationships between Jekyll documents.'
-	spec.description = "Allows collection documents to specify their relationships with each other, via many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each document's frontmatter."
+	spec.summary = "Define and traverse relationships between Jekyll documents."
+	spec.description = "Collection documents can specify many-to-many relationships with each other in their frontmatter, forming trees, graphs or relational-database-like structures. Parses the relationships and writes them back to frontmatter."
 	spec.homepage = 'https://github.com/ConvincibleMedia/jekyll-relationships'
 	spec.license = 'LGPL-3.0-or-later'
 

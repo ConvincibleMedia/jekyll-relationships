@@ -503,3 +503,7 @@ relationships:
       frontmatter:
         foreign: data.client
 ```
+
+## Notes
+
+**This gem is in an alpha release.** Breaking changes may occur between 0.x minor versions, and the gem overall has not been fully tested. If you encounter any issues please report them.

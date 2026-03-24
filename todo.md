@@ -1,14 +1,13 @@
 # Roadmap
 
-## via mode
+## Ideas for features
 
-from: projects
-to: services
-via: self, deliverables
-frontmatter:
-	foreign:
-		deliverables: data.deliverables
-
-
-importing, flattening, output, multiple outputs?
+* `via`: Parse relationships from A to B to C as relationships from A to C. E.g.
+  
+	```yaml
+	from: projects
+	to: services
+	via: self, deliverables
+	```
+* Multiple output frontmatter locations
 

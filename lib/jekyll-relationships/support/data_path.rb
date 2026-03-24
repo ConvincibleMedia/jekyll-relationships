@@ -2,8 +2,8 @@
 
 module Jekyll
 module Plugins
-
 module Relationships
+
 module Support
 
 # Reads and writes dot-separated frontmatter paths on plain nested hashes.
@@ -188,7 +188,7 @@ class DataPath
 end
 
 end
-end
 
+end
 end
 end

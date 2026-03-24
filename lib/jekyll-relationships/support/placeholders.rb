@@ -2,8 +2,8 @@
 
 module Jekyll
 module Plugins
-
 module Relationships
+
 module Support
 
 	# Stores the literal placeholder tokens used in relationship configuration.
@@ -15,7 +15,7 @@ module Support
 	end
 
 end
-end
 
+end
 end
 end
