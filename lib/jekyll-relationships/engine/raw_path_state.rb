@@ -142,10 +142,12 @@ class Engine
 		end
 
 		# Builds the upgraded path value while preserving its concrete locations.
-		def upgraded_raw_value(registry:, active_document_checker: nil)
+		def upgraded_raw_value(primary_path: nil, registry:, active_document_checker: nil)
 			return nil unless present?
 
+			effective_primary_path = preferred_primary_path(primary_path)
 			upgraded_values = upgraded_location_values(
+				primary_path: effective_primary_path,
 				registry: registry,
 				active_document_checker: active_document_checker
 			)
@@ -155,16 +157,18 @@ class Engine
 		end
 
 		# Writes upgraded values back onto the exact matched locations.
-		def write_upgraded_input!(registry:, active_document_checker: nil)
+		def write_upgraded_input!(primary_path: nil, registry:, active_document_checker: nil)
+			effective_primary_path = preferred_primary_path(primary_path)
 			upgraded_location_values(
+				primary_path: effective_primary_path,
 				registry: registry,
 				active_document_checker: active_document_checker
 			)
 			@location_states.each do |location_state|
-				location_state.write_upgraded_value(primary_path: @preferred_primary_path) do |entry|
+				location_state.write_upgraded_value(primary_path: effective_primary_path) do |entry|
 					resolve_entry(
 						entry: entry,
-						primary_path: @preferred_primary_path,
+						primary_path: effective_primary_path,
 						registry: registry,
 						active_document_checker: active_document_checker
 					)
@@ -196,17 +200,23 @@ class Engine
 		end
 
 		# Builds upgraded values for every concrete location under this raw path.
-		def upgraded_location_values(registry:, active_document_checker:)
+		def upgraded_location_values(primary_path:, registry:, active_document_checker:)
 			@location_states.map do |location_state|
-				location_state.upgraded_value(primary_path: @preferred_primary_path) do |entry|
+				location_state.upgraded_value(primary_path: primary_path) do |entry|
 					resolve_entry(
 						entry: entry,
-						primary_path: @preferred_primary_path,
+						primary_path: primary_path,
 						registry: registry,
 						active_document_checker: active_document_checker
 					)
 				end
 			end
+		end
+
+		# Returns the primary-key scheme that should govern upgrade-time lookups.
+		def preferred_primary_path(primary_path)
+			@preferred_primary_path ||= primary_path
+			@preferred_primary_path
 		end
 	end
 end

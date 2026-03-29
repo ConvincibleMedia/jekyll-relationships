@@ -80,14 +80,16 @@ class Engine
 				next if output_paths.key?(path)
 				next unless raw_state.present?
 
-				raw_state.write_upgraded_input!(
-					registry: @registry,
-					active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
-				)
-				value = raw_state.upgraded_raw_value(
-					registry: @registry,
-					active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
-				)
+					raw_state.write_upgraded_input!(
+						primary_path: input_path_state.fetch(:definitions).first.primary_path,
+						registry: @registry,
+						active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
+					)
+					value = raw_state.upgraded_raw_value(
+						primary_path: input_path_state.fetch(:definitions).first.primary_path,
+						registry: @registry,
+						active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
+					)
 				@engine.debug_logger.document_event(
 					document: document,
 					definitions: input_path_state.fetch(:definitions),

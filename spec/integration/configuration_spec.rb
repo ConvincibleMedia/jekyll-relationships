@@ -76,6 +76,30 @@ RSpec.describe 'relationships configuration' do
 		expect(services_relationship.debug?('upgrading')).to eq(false)
 	end
 
+	it 'supports debug hash filters with IDs and nested log settings' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'debug' => {
+					'ids' => 'products/alpha, categories/one',
+					'log' => 'resolution, upgrading'
+				},
+				'relationships' => [
+					{
+						'from' => 'products',
+						'to' => 'categories'
+					}
+				]
+			}
+		)
+
+		expect(configuration.debug.enabled?('resolution')).to eq(true)
+		expect(configuration.debug.enabled?('upgrading')).to eq(true)
+		expect(configuration.debug.enabled?('mutations')).to eq(false)
+		expect(configuration.debug.matches_ids?(['products/alpha'])).to eq(true)
+		expect(configuration.debug.matches_ids?(['categories/one'])).to eq(true)
+		expect(configuration.debug.matches_ids?(['products/beta'])).to eq(false)
+	end
+
 	it 'supports overridden keywords for self relationships while collection placeholders stay literal' do
 		relationships = {
 			'keywords' => {

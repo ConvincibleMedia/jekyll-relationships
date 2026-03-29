@@ -38,6 +38,11 @@ class NormalRelationship
 		@debug.enabled?(area)
 	end
 
+	# Returns true when one event's related IDs satisfy this pair's debug filter.
+	def debug_ids_match?(ids)
+		@debug.matches_ids?(ids)
+	end
+
 	# Registers one resolver class against this relationship pair.
 	def add_resolver(resolver_class)
 		@resolver_classes << resolver_class

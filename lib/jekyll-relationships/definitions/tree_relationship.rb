@@ -35,6 +35,11 @@ class TreeRelationship
 		@debug.enabled?(area)
 	end
 
+	# Returns true when one event's related IDs satisfy this definition's debug filter.
+	def debug_ids_match?(ids)
+		@debug.matches_ids?(ids)
+	end
+
 	# Returns true when one parent-child direction is permitted.
 	def allows_parent_child?(parent_collection:, child_collection:)
 		@parent_child_pairs.include?([parent_collection, child_collection])

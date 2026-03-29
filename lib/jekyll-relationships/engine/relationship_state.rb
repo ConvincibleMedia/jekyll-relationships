@@ -50,7 +50,7 @@ class Engine
 				bidirectional: @definition.bidirectional,
 				resolvers: @definition.resolver_classes.map { |resolver_class| @engine.debug_logger.resolver_name(resolver_class) }
 			})
-			seed_raw_links!
+			seed_initial_links!
 			run_resolvers!
 			@status = :resolved
 			debug('resolution', 'resolve_finish', {
@@ -136,10 +136,24 @@ class Engine
 
 		private
 
+		# Seeds the state either from the previous in-memory graph or from raw
+		# frontmatter during the initial ingestion pass.
+		def seed_initial_links!
+			return if @raw_seeded
+
+			snapshot_entries = @engine.relationship_snapshot_for(@document, @definition.to_collection)
+			if snapshot_entries.nil?
+				seed_raw_links!
+			else
+				seed_snapshot_links!(snapshot_entries)
+			end
+
+			@raw_seeded = true
+		end
+
 		# Seeds the state from raw frontmatter once.
 		def seed_raw_links!
 			return unless @definition.reads_frontmatter
-			return if @raw_seeded
 
 			@definition.foreign_paths.each do |path|
 				raw_state = @engine.raw_path_state(@document, path)
@@ -182,8 +196,19 @@ class Engine
 					)
 				end
 			end
+		end
 
-			@raw_seeded = true
+		# Seeds the state from one previous session's resolved link set.
+		def seed_snapshot_links!(entries)
+			Array(entries).each do |entry|
+				link(
+					entry.fetch(:document),
+					metadata: entry.fetch(:metadata),
+					count: entry.fetch(:count),
+					reflect: @definition.bidirectional,
+					origin: 'session snapshot'
+				)
+			end
 		end
 
 		# Instantiates and runs every configured resolver class.

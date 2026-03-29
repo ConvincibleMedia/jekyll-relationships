@@ -11,12 +11,13 @@ class Engine
 	#
 	# The main engine creates a fresh session for each rebuild round so raw-path
 	# caches, resolver state, and relationship accumulators never outlive the
-	# graph they were built against.
+	# graph they were built against. Later rounds may inherit the previous
+	# session's resolved links so pruning continues from the in-memory graph.
 	class Session
 		attr_reader :site, :configuration, :registry, :tree_graph, :data_path, :debug_logger
 
 		# Builds one new resolution session.
-		def initialize(engine:, active_document_ids:, tree_graph:)
+		def initialize(engine:, active_document_ids:, tree_graph:, relationship_snapshot: nil)
 			@engine = engine
 			@site = engine.site
 			@configuration = engine.configuration
@@ -24,6 +25,7 @@ class Engine
 			@tree_graph = tree_graph
 			@data_path = engine.data_path
 			@debug_logger = engine.debug_logger
+			@relationship_snapshot = relationship_snapshot
 			@active_document_ids = active_document_ids.each_with_object({}) do |document_id, active_ids|
 				active_ids[document_id] = true
 			end
@@ -31,6 +33,16 @@ class Engine
 			@raw_path_states = {}
 			@relationship_states = {}
 			@document_resolution_states = {}
+		end
+
+		# Returns the previous round's stored links for one concrete pair.
+		#
+		# Nil means this session has no inherited graph state for the pair, so the
+		# relationship should fall back to initial frontmatter ingestion instead.
+		def relationship_snapshot_for(document, to_collection)
+			return nil if @relationship_snapshot.nil?
+
+			@relationship_snapshot[[document.object_id, to_collection]]
 		end
 
 		# Returns true when the document is active in this session.
@@ -158,6 +170,23 @@ class Engine
 				documents_for(collection).each do |document|
 					definitions.each do |definition|
 						resolve_relationships(document, definition.to_collection)
+					end
+				end
+			end
+		end
+
+		# Captures the fully resolved in-memory graph for the next session.
+		def relationship_snapshot
+			@configuration.collections.each_with_object({}) do |collection, snapshot|
+				definitions = @configuration.normal_relationships_for(collection)
+				next if definitions.empty?
+
+				documents_for(collection).each do |document|
+					definitions.each do |definition|
+						state = relationship_state(document, definition.to_collection)
+						next unless state
+
+						snapshot[[document.object_id, definition.to_collection]] = state.current_link_entries
 					end
 				end
 			end

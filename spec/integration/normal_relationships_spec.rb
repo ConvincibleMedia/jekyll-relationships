@@ -128,6 +128,51 @@ RSpec.describe 'normal relationships' do
 		expect(debug_messages).to include(a_string_including('write_output'))
 	end
 
+	it 'filters debug logs down to events that relate to the configured IDs' do
+		define_resolver('IdFilteredDebugTraceResolver', from: 'products', to: 'categories') do
+			def resolve
+				link('categories/extra')
+			end
+		end
+
+		relationships = {
+			'debug' => {
+				'ids' => 'categories/extra',
+				'log' => 'mutations'
+			},
+			'relationships' => [
+				{ 'from' => 'products', 'to' => 'categories' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('products', 'alpha', {
+				'relationships' => {
+					'categories' => ['categories/one']
+				}
+			}),
+			collection_document('categories', 'one'),
+			collection_document('categories', 'extra')
+		)
+
+		debug_messages = []
+		allow(Jekyll.logger).to receive(:info) do |topic, message|
+			next unless topic == 'Relationships:'
+			next unless message.include?('[debug:')
+
+			debug_messages << message
+		end
+
+		build_relationship_site(collections: %w[products categories], relationships: relationships, files: files) do |_site, _files|
+			nil
+		end
+
+		expect(debug_messages).to include(a_string_including('[debug:mutations] _products/alpha.md (products -> categories) link'))
+		expect(debug_messages).to include(a_string_including('target_key="categories/extra"'))
+		expect(debug_messages).not_to include(a_string_including('target_key="categories/one"'))
+		expect(debug_messages).not_to include(a_string_including('[debug:resolution]'))
+	end
+
 	it 'counts duplicate links gathered from multiple input paths and rewrites the final set onto the first path' do
 		define_resolver('FirstPathDeduper', from: 'products', to: 'categories') do
 			def resolve

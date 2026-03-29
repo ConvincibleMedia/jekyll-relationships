@@ -27,7 +27,9 @@ class Engine
 		@configuration = Configuration.new(@site.config)
 		return unless @configuration.enabled?
 
-		@debug_logger = DebugLogger.new
+		@debug_logger = DebugLogger.new(
+			reference_key_property: @configuration.reference_template.key_property
+		)
 		@run_logger = RunLogger.new
 		@registry = Documents::Registry.new(site: @site, collections: @configuration.collections)
 		@data_path = Jekyll::Plugins::Relationships::Support::DataPath.new
@@ -49,7 +51,8 @@ class Engine
 		final_session = Session.new(
 			engine: self,
 			active_document_ids: prune_result.fetch(:active_document_ids),
-			tree_graph: prune_result.fetch(:tree_graph)
+			tree_graph: prune_result.fetch(:tree_graph),
+			relationship_snapshot: prune_result.fetch(:relationship_snapshot)
 		)
 		final_session.resolve_all_relationships!
 		final_normal_graph = Pruning::NormalGraph.new(session: final_session)
@@ -97,10 +100,12 @@ class Engine
 		current_active_document_ids = all_active_document_ids
 		removed_documents = {}
 		current_tree_graph = original_tree_graph
+		current_relationship_snapshot = nil
 		return {
 			active_document_ids: current_active_document_ids,
 			removed_documents: [],
-			tree_graph: current_tree_graph
+			tree_graph: current_tree_graph,
+			relationship_snapshot: current_relationship_snapshot
 		} unless @configuration.pruning_enabled?
 
 		tree_phase = Pruning::TreePhase.new(engine: self, provenance: tree_provenance)
@@ -116,9 +121,11 @@ class Engine
 			session = Session.new(
 				engine: self,
 				active_document_ids: current_active_document_ids,
-				tree_graph: current_tree_graph
+				tree_graph: current_tree_graph,
+				relationship_snapshot: current_relationship_snapshot
 			)
 			session.resolve_all_relationships!
+			current_relationship_snapshot = session.relationship_snapshot
 
 			normal_removed_documents = Pruning::RulePruner.new(
 				graph: Pruning::NormalGraph.new(session: session),
@@ -128,7 +135,8 @@ class Engine
 				return {
 					active_document_ids: current_active_document_ids,
 					removed_documents: removed_documents.values,
-					tree_graph: current_tree_graph
+					tree_graph: current_tree_graph,
+					relationship_snapshot: current_relationship_snapshot
 				}
 			end
 
@@ -149,7 +157,8 @@ class Engine
 		{
 			active_document_ids: current_active_document_ids,
 			removed_documents: removed_documents.values,
-			tree_graph: current_tree_graph
+			tree_graph: current_tree_graph,
+			relationship_snapshot: current_relationship_snapshot
 		}
 	end
 

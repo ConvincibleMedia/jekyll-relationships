@@ -23,12 +23,32 @@ class Configuration
 			'resolvers' => 'resolver execution and helper calls',
 			'trees' => 'tree discovery, edge handling, and tree write-back'
 		}.freeze
+		HASH_KEYS = %w[ids log].freeze
 
 		ALL_AREAS = AREAS.keys.freeze
 
 		class << self
 			# Builds one explicit debug setting from a loose config value.
 			def build(value:, string_array:, context:)
+				return build_hash_value(value: value, string_array: string_array, context: context) if value.is_a?(Hash)
+
+				build_scalar_value(value: value, string_array: string_array, context: context)
+			end
+
+			# Returns one disabled debug setting.
+			def disabled
+				new([])
+			end
+
+			# Returns one debug setting that enables every area.
+			def all
+				new(ALL_AREAS)
+			end
+
+			private
+
+			# Builds one debug setting from the legacy scalar forms.
+			def build_scalar_value(value:, string_array:, context:)
 				return disabled if value.nil? || false_value?(value)
 				return all if true_value?(value)
 
@@ -45,17 +65,29 @@ class Configuration
 				new(areas.uniq)
 			end
 
-			# Returns one disabled debug setting.
-			def disabled
-				new([])
-			end
+			# Builds one debug setting from the new hash form with optional ID filtering.
+			def build_hash_value(value:, string_array:, context:)
+				hash_value = stringify_hash(value)
+				unknown_keys = hash_value.keys - HASH_KEYS
+				unless unknown_keys.empty?
+					raise ConfigurationError, "`#{context}` contains unsupported keys #{unknown_keys.sort.join(', ')}. Supported keys: #{HASH_KEYS.join(', ')}."
+				end
 
-			# Returns one debug setting that enables every area.
-			def all
-				new(ALL_AREAS)
+				log_context = hash_value.key?('log') ? "#{context}.log" : context
+				scalar_setting = build_scalar_value(
+					value: hash_value.key?('log') ? hash_value.fetch('log') : true,
+					string_array: string_array,
+					context: log_context
+				)
+				new(
+					scalar_setting.areas,
+					parse_ids(
+						value: hash_value['ids'],
+						string_array: string_array,
+						context: "#{context}.ids"
+					)
+				)
 			end
-
-			private
 
 			# Returns true when a loose value means "debug everything".
 			def true_value?(value)
@@ -83,13 +115,34 @@ class Configuration
 				raise ConfigurationError,
 					"`#{context}` must be true, false, `all`, or a comma-delimited string/array of debug areas: #{ALL_AREAS.join(', ')}."
 			end
+
+			# Parses one optional string-or-array ID filter.
+			def parse_ids(value:, string_array:, context:)
+				return [] if value.nil?
+
+				raw_ids = string_array.interpret(value, split: true, flatten: true)
+				raise ConfigurationError, "`#{context}` must be a string or array of strings." if raw_ids.empty?
+
+				ids = raw_ids.map { |raw_id| raw_id.to_s.strip }.reject(&:empty?).uniq
+				raise ConfigurationError, "`#{context}` must contain at least one non-blank ID." if ids.empty?
+
+				ids
+			end
+
+			# Converts one config hash to a shallow string-keyed copy.
+			def stringify_hash(hash)
+				hash.each_with_object({}) do |(key, value), stringified|
+					stringified[key.to_s] = value
+				end
+			end
 		end
 
-		attr_reader :areas
+		attr_reader :areas, :ids
 
-		# Captures one immutable set of enabled debug areas.
-		def initialize(areas)
+		# Captures one immutable set of enabled debug areas and optional ID filters.
+		def initialize(areas, ids = [])
 			@areas = areas.freeze
+			@ids = Array(ids).map(&:to_s).uniq.freeze
 		end
 
 		# Returns true when any debug area is enabled, or when one named area is enabled.
@@ -97,6 +150,13 @@ class Configuration
 			return !@areas.empty? if area.nil?
 
 			@areas.include?(normalise_runtime_area(area))
+		end
+
+		# Returns true when this setting either has no ID filter or overlaps one.
+		def matches_ids?(related_ids)
+			return true if @ids.empty?
+
+			Array(related_ids).map(&:to_s).any? { |related_id| @ids.include?(related_id) }
 		end
 
 		private

@@ -454,7 +454,7 @@ relationships:
 If pruning removes a node from a tree, any children that lose all parents become orphans. `relationships.prune.tree.orphans` controls what happens:
 
 * `grandparents` (default): reconnect to the pruned node's original grandparents, if any.
-* `grandparents required`: as above, but also remove the orphan if there is no grandparent to connec to.
+* `grandparents required`: as above, but also remove the orphan if there is no grandparent to connect to.
 * `prune`: prune all orphans recursively.
 * `orphan`: leave them parentless.
 

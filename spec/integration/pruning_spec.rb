@@ -280,7 +280,7 @@ RSpec.describe 'pruning' do
 		end
 	end
 
-	it 'reruns normal resolvers after pruning changes the active tree' do
+	it 'preserves previously resolved links while rerunning normal resolvers after pruning changes the active tree' do
 		define_resolver('AncestorServiceLinker', from: 'pages', to: 'services') do
 			def resolve
 				ancestors.each do |ancestor|
@@ -333,7 +333,139 @@ RSpec.describe 'pruning' do
 		build_relationship_site(collections: %w[pages services badges], relationships: relationships, files: files) do |site, _files|
 			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(%w[branch leaf])
 			expect(document_for(site, 'pages', 'branch').data.fetch('relationships').fetch('parents')).to eq([])
-			expect(reference_ids(document_for(site, 'pages', 'leaf').data.fetch('relationships').fetch('services'))).to eq(['services/branch'])
+			expect(reference_ids(document_for(site, 'pages', 'leaf').data.fetch('relationships').fetch('services'))).to eq(['services/branch', 'services/root'])
+		end
+	end
+
+	it 'preserves surviving resolver-added links after inverse normal pruning removes their raw source links' do
+		define_resolver('ClientIndustryAncestors', from: 'clients', to: 'industries') do
+			def resolve
+				relationships.each do |industry|
+					ancestors(industry).each do |ancestor|
+						link(ancestor, reference: { 'distance' => ancestor.fetch('distance') })
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'industries' },
+				{ 'from' => 'industries', 'to' => 'self', 'mode' => 'parent' },
+				{
+					'from' => 'projects',
+					'to' => 'industries',
+					'prune' => {
+						'mode' => 'inverse',
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('clients', 'beckett-rankine', {
+				'relationships' => {
+					'industries' => ['industries/architecture']
+				}
+			}),
+			collection_document('industries', 'professional-services'),
+			collection_document('industries', 'architecture', {
+				'relationships' => {
+					'parent' => 'industries/professional-services'
+				}
+			}),
+			collection_document('projects', 'proof', {
+				'relationships' => {
+					'industries' => ['industries/professional-services']
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[clients industries projects], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('industries').docs.map(&:basename_without_ext)).to eq(['professional-services'])
+			expect(reference_ids(document_for(site, 'clients', 'beckett-rankine').data.fetch('relationships').fetch('industries'))).to eq(['industries/professional-services'])
+		end
+	end
+
+	it 'upgrades untouched ingestion paths with the configured primary path after snapshot-seeded resolution' do
+		define_resolver('PrimaryPathClientIndustryAncestors', from: 'clients', to: 'industries') do
+			def resolve
+				relationships.each do |industry|
+					ancestors(industry).each do |ancestor|
+						link(ancestor, reference: { 'distance' => ancestor.fetch('distance') })
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'frontmatter' => {
+				'base' => '',
+				'primary' => 'meta.id',
+				'foreign' => 'data.<collection>',
+				'output' => 'meta.links.<collection>'
+			},
+			'tree' => {
+				'frontmatter' => {
+					'parent' => 'meta.parent'
+				}
+			},
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'industries' },
+				{ 'from' => 'industries', 'to' => 'self', 'mode' => 'parent' },
+				{
+					'from' => 'projects',
+					'to' => 'industries',
+					'prune' => {
+						'mode' => 'inverse',
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('clients', 'beckett-rankine', {
+				'meta' => {
+					'id' => 'client-beckett-rankine'
+				},
+				'data' => {
+					'industries' => [
+						{
+							'id' => 'industry-architecture',
+							'slug' => 'architecture',
+							'title' => 'Architecture',
+							'type' => 'industry'
+						}
+					]
+				}
+			}),
+			collection_document('industries', 'professional-services', {
+				'meta' => {
+					'id' => 'industry-professional-services'
+				}
+			}),
+			collection_document('industries', 'architecture', {
+				'meta' => {
+					'id' => 'industry-architecture',
+					'parent' => 'industry-professional-services'
+				}
+			}),
+			collection_document('projects', 'proof', {
+				'meta' => {
+					'id' => 'project-proof'
+				},
+				'data' => {
+					'industries' => ['industry-professional-services']
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[clients industries projects], relationships: relationships, files: files) do |site, _files|
+			client = document_for(site, 'clients', 'beckett-rankine')
+			expect(client.data.fetch('data').fetch('industries')).to eq([])
+			expect(reference_ids(client.data.fetch('meta').fetch('links').fetch('industries'))).to eq(['industry-professional-services'])
 		end
 	end
 
@@ -604,7 +736,7 @@ RSpec.describe 'pruning' do
 		end
 	end
 
-	it 'stops pruning at the configured iteration cap but still rebuilds the final graph' do
+	it 'stops pruning at the configured iteration cap while preserving the surviving in-memory graph' do
 		define_resolver('CappedAncestorServiceLinker', from: 'pages', to: 'services') do
 			def resolve
 				ancestors.each do |ancestor|
@@ -656,7 +788,7 @@ RSpec.describe 'pruning' do
 
 		build_relationship_site(collections: %w[pages services badges], relationships: relationships, files: files) do |site, _files|
 			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(['leaf'])
-			expect(document_for(site, 'pages', 'leaf').data.fetch('relationships').fetch('services')).to eq([])
+			expect(reference_ids(document_for(site, 'pages', 'leaf').data.fetch('relationships').fetch('services'))).to eq(['services/root'])
 		end
 	end
 
