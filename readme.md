@@ -141,7 +141,7 @@ frontmatter:
   ```
 
   In `products` documents, this would find links to `categories` at `links.categories_links` and links to `tags` at `links.tags_links`.
-* `foreign` can be an array of frontmatter locations where references will be read. These will all be accumulated.
+* `foreign` can be an array of frontmatter locations where references will be read. These will all be accumulated. Unless `output` is set, the first location will become the output location and others will be untouched.
 
 ### Output
 
@@ -319,9 +319,10 @@ This document's links are modified with the `link` and `unlink` methods:
 * `link(reference)`
   * `reference` gives the document to link to, from this document. It must be in the `@to` collection.
   * `reference:` (optional named parameter): gives a hash that the created reference hash will merge over, providing arbitrary addititional properties to the hash.
-  * Adding a duplicate link has no effect.
+  * `persist:` (optional named parameter, `true` or `false`): whether to remember this resolver-added link so it can be restored in later prune rounds even if the original route by which it was discovered disappears (see [Pruning](#pruning)).
 * `unlink(reference)`
   * Remove the link to the `reference`d document.
+  * If that link had previously been persisted, explicit `unlink` also clears the persisted copy so it will not be restored in later rounds.
   * `unlink` (no reference) removes all links on this document to the `@to` collection.
 
 Because the class extends `Resolvers::Base` it has access to these helpers:
@@ -381,6 +382,29 @@ class ProjectServices < Jekyll::Plugins::Relationships::Resolvers::Base
 
 end
 ```
+
+### Persistence
+
+You can declare a default persistence mode for `link(...)` calls:
+
+* Globally for resolver classes that do not override it:
+
+  ```ruby
+  module Jekyll::Plugins::Relationships::Resolvers
+    persist true
+  end
+  ```
+
+* Per resolver class:
+
+  ```ruby
+  class ProductsAndCategories < Jekyll::Plugins::Relationships::Resolvers::Base
+    persist true
+  end
+  ```
+
+The general default is `false`.
+
 
 ## Multiple Links
 
@@ -450,6 +474,8 @@ relationships:
 * `depth` (required if pruning a tree): only for tree relationships, determines which tree nodes can be pruned:
   * `1` selects roots, `2` would be roots and their chlidren, etc.
   * `-1` and negative integers are the negation of their positive counterparts. So `-2` means all but the first two levels of the tree are eligible for pruning.
+
+Pruning is iterative. E.g. if pruning causes more nodes to trigger pruning rules, they will also be pruned. Each round fully resolves the tree first, then fully resolves normal relationships on top of that tree.
 
 If pruning removes a node from a tree, any children that lose all parents become orphans. `relationships.prune.tree.orphans` controls what happens:
 

@@ -11,13 +11,13 @@ class Engine
 	#
 	# The main engine creates a fresh session for each rebuild round so raw-path
 	# caches, resolver state, and relationship accumulators never outlive the
-	# graph they were built against. Later rounds may inherit the previous
-	# session's resolved links so pruning continues from the in-memory graph.
+	# graph they were built against. Every round reseeds from the current source
+	# graph plus any explicit persisted-link overlay.
 	class Session
 		attr_reader :site, :configuration, :registry, :tree_graph, :data_path, :debug_logger
 
 		# Builds one new resolution session.
-		def initialize(engine:, active_document_ids:, tree_graph:, relationship_snapshot: nil)
+		def initialize(engine:, active_document_ids:, tree_graph:, normal_seed:, persisted_links:)
 			@engine = engine
 			@site = engine.site
 			@configuration = engine.configuration
@@ -25,7 +25,9 @@ class Engine
 			@tree_graph = tree_graph
 			@data_path = engine.data_path
 			@debug_logger = engine.debug_logger
-			@relationship_snapshot = relationship_snapshot
+			@normal_seed = normal_seed
+			@persisted_links = persisted_links
+			@persisted_links.start_round!
 			@active_document_ids = active_document_ids.each_with_object({}) do |document_id, active_ids|
 				active_ids[document_id] = true
 			end
@@ -33,16 +35,7 @@ class Engine
 			@raw_path_states = {}
 			@relationship_states = {}
 			@document_resolution_states = {}
-		end
-
-		# Returns the previous round's stored links for one concrete pair.
-		#
-		# Nil means this session has no inherited graph state for the pair, so the
-		# relationship should fall back to initial frontmatter ingestion instead.
-		def relationship_snapshot_for(document, to_collection)
-			return nil if @relationship_snapshot.nil?
-
-			@relationship_snapshot[[document.object_id, to_collection]]
+			@initial_links_seeded = false
 		end
 
 		# Returns true when the document is active in this session.
@@ -64,8 +57,7 @@ class Engine
 				path: path,
 				data_path: @data_path,
 				string_array: @string_array,
-				reference_template: @configuration.reference_template,
-				multiple_settings: @configuration.multiple_settings
+				reference_template: @configuration.reference_template
 			)
 		end
 
@@ -78,6 +70,7 @@ class Engine
 				raise ResolutionError, "No relationship is defined from collection `#{document.collection.label}` to `#{to_collection}`."
 			end
 
+			ensure_initial_links_seeded!
 			resolve_state(state)
 			state.current_references
 		end
@@ -112,6 +105,48 @@ class Engine
 				primary_path: primary_path,
 				collection: collection_hint || (parsed_reference.collection.nil? ? nil : parsed_reference.collection.to_s)
 			)
+		end
+
+		# Returns the source-derived seed entries for one concrete pair.
+		def seed_entries_for(document, to_collection)
+			return [] unless active_document?(document)
+
+			@normal_seed.entries_for(document, to_collection).select do |entry|
+				active_document?(entry.fetch(:document))
+			end
+		end
+
+		# Records one persisted resolver link so it can survive later rounds.
+		def persist_link(source_state:, target_document:, metadata:, count:)
+			@persisted_links.persist_link(
+				source_state: source_state,
+				target_document: target_document,
+				metadata: metadata,
+				count: count
+			)
+		end
+
+		# Removes one persisted resolver link.
+		def clear_persisted_link(source_state:, target_document:)
+			@persisted_links.clear_link(
+				source_state: source_state,
+				target_document: target_document
+			)
+		end
+
+		# Removes every persisted resolver link on one state.
+		def clear_all_persisted_links(source_state:)
+			@persisted_links.clear_all(source_state: source_state)
+		end
+
+		# Reapplies persisted links only when resolvers did not recreate them.
+		def reapply_persisted_links(state:)
+			@persisted_links.reapply_missing_links(state: state)
+		end
+
+		# Refreshes remembered persisted-link positions from the final current ordering.
+		def refresh_persisted_positions(state:)
+			@persisted_links.refresh_positions(state: state)
 		end
 
 		# Mirrors one bidirectional add into the reverse state.
@@ -175,29 +210,31 @@ class Engine
 			end
 		end
 
-		# Captures the fully resolved in-memory graph for the next session.
-		def relationship_snapshot
-			@configuration.collections.each_with_object({}) do |collection, snapshot|
-				definitions = @configuration.normal_relationships_for(collection)
-				next if definitions.empty?
-
-				documents_for(collection).each do |document|
-					definitions.each do |definition|
-						state = relationship_state(document, definition.to_collection)
-						next unless state
-
-						snapshot[[document.object_id, definition.to_collection]] = state.current_link_entries
-					end
-				end
-			end
-		end
-
 		# Writes the current session's resolved relationships back to frontmatter.
 		def write_back!
 			WriteBack.new(engine: self).write_normal_relationships!
 		end
 
 		private
+
+		# Seeds every normal relationship state before any resolver mutates the graph.
+		#
+		# Bidirectional removals can target reverse states that have not been
+		# resolved yet. Seeding the whole current graph up front ensures those
+		# reverse states already contain their direct seed links before any resolver
+		# adds or removes mirrored relationships.
+		def ensure_initial_links_seeded!
+			return if @initial_links_seeded
+
+			@configuration.collections.each do |collection|
+				@configuration.normal_relationships_for(collection).each do |definition|
+					documents_for(collection).each do |document|
+						relationship_state(document, definition.to_collection)&.ensure_seeded!
+					end
+				end
+			end
+			@initial_links_seeded = true
+		end
 
 		# Resolves one relationship state with cycle detection.
 		def resolve_state(state)

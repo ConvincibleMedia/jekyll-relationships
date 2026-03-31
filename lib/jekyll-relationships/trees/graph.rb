@@ -48,6 +48,35 @@ class Graph
 		@edge_builder.build!
 	end
 
+	# Returns one deep copy of the current tree graph state.
+	def deep_dup
+		duplicated_graph = self.class.new(
+			site: @site,
+			configuration: @configuration,
+			registry: @registry,
+			data_path: @data_path,
+			debug_logger: @debug_logger,
+			active_document_ids: @active_document_ids.nil? ? nil : @active_document_ids.keys
+		)
+		duplicated_graph.instance_variable_set(
+			:@parents,
+			duplicate_document_adjacency(@parents)
+		)
+		duplicated_graph.instance_variable_set(
+			:@children,
+			duplicate_document_adjacency(@children)
+		)
+		duplicated_graph.instance_variable_set(
+			:@parent_edge_entries,
+			duplicate_edge_entries(@parent_edge_entries)
+		)
+		duplicated_graph.instance_variable_set(
+			:@child_edge_entries,
+			duplicate_edge_entries(@child_edge_entries)
+		)
+		duplicated_graph
+	end
+
 	# Returns true when one document is part of any tree relationship.
 	def participating?(document)
 		@tree_collections.include?(document.collection.label)
@@ -240,6 +269,32 @@ class Graph
 		end
 	end
 
+	# Removes one document from the graph along with every adjacent edge.
+	def remove_document!(document)
+		return false unless active_document?(document)
+
+		@active_document_ids.delete(document.object_id) unless @active_document_ids.nil?
+		@children[document].dup.each do |child_document|
+			remove_parent_edge(parent_document: document, child_document: child_document)
+		end
+		@parents[document].dup.each do |parent_document|
+			remove_parent_edge(parent_document: parent_document, child_document: document)
+		end
+		@children.delete(document)
+		@parents.delete(document)
+		@child_edge_entries.delete(document)
+		@parent_edge_entries.delete(document)
+		clear_distance_cache
+		true
+	end
+
+	# Removes many documents from the graph.
+	def remove_documents!(documents)
+		Array(documents).each do |document|
+			remove_document!(document)
+		end
+	end
+
 	# Returns every document participating in tree relationships.
 	def tree_documents
 		@tree_collections.to_a.flat_map { |collection| documents_for(collection) }.uniq
@@ -336,6 +391,18 @@ class Graph
 	# Returns true when one edge already exists.
 	def edge_exists?(parent_document:, child_document:)
 		@parents[child_document].include?(parent_document)
+	end
+
+	# Removes one stored parent-child edge and its metadata in both directions.
+	def remove_parent_edge(parent_document:, child_document:)
+		@parents[child_document].delete(parent_document)
+		@children[parent_document].delete(child_document)
+		@parent_edge_entries[child_document].reject! do |entry|
+			entry.fetch(:document) == parent_document
+		end
+		@child_edge_entries[parent_document].reject! do |entry|
+			entry.fetch(:document) == child_document
+		end
 	end
 
 	# Returns true when one collection has already reached its configured cap.
@@ -444,6 +511,20 @@ class Graph
 			event: event,
 			details: details
 		)
+	end
+
+	# Duplicates one adjacency hash keyed by document.
+	def duplicate_document_adjacency(adjacency)
+		adjacency.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |(document, neighbours), duplicated_adjacency|
+			duplicated_adjacency[document] = neighbours.dup
+		end
+	end
+
+	# Duplicates one edge-entry hash keyed by document.
+	def duplicate_edge_entries(edge_entries)
+		edge_entries.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |(document, entries), duplicated_edge_entries|
+			duplicated_edge_entries[document] = entries.map(&:dup)
+		end
 	end
 end
 

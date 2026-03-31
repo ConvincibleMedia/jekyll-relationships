@@ -9,8 +9,8 @@ class Engine
 
 	# Writes resolved normal relationships back into document frontmatter.
 	#
-	# Input paths are upgraded in place while final resolved link sets are
-	# written to the configured output path for each relationship pair.
+	# Each relationship writes one final resolved link set to its configured
+	# output path. Any separate ingestion paths are left untouched.
 	class WriteBack
 		# Builds one write-back helper for the current engine instance.
 		def initialize(engine:)
@@ -37,7 +37,6 @@ class Engine
 		# Writes every normal relationship path for one document.
 		def write_document_relationships(document:, definitions:)
 			output_paths = {}
-			input_paths = {}
 
 			definitions.each do |definition|
 				state = @engine.relationship_state(document, definition.to_collection)
@@ -46,13 +45,6 @@ class Engine
 				output_path = definition.final_output_path
 				output_paths[output_path] ||= []
 				output_paths[output_path] << state
-				definition.foreign_paths.each do |path|
-					input_paths[path] ||= {
-						raw_state: @engine.raw_path_state(document, path),
-						definitions: []
-					}
-					input_paths[path][:definitions] << definition
-				end
 			end
 
 			output_paths.each do |path, states|
@@ -68,33 +60,6 @@ class Engine
 					definitions: states.map(&:definition),
 					area: 'upgrading',
 					event: 'write_output',
-					details: {
-						path: path,
-						value: value
-					}
-				)
-			end
-
-			input_paths.each do |path, input_path_state|
-				raw_state = input_path_state.fetch(:raw_state)
-				next if output_paths.key?(path)
-				next unless raw_state.present?
-
-					raw_state.write_upgraded_input!(
-						primary_path: input_path_state.fetch(:definitions).first.primary_path,
-						registry: @registry,
-						active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
-					)
-					value = raw_state.upgraded_raw_value(
-						primary_path: input_path_state.fetch(:definitions).first.primary_path,
-						registry: @registry,
-						active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
-					)
-				@engine.debug_logger.document_event(
-					document: document,
-					definitions: input_path_state.fetch(:definitions),
-					area: 'upgrading',
-					event: 'upgrade_input',
 					details: {
 						path: path,
 						value: value
@@ -139,13 +104,6 @@ class Engine
 			return @engine.documents_for(collection) if @engine.respond_to?(:documents_for)
 
 			@registry.documents_for(collection)
-		end
-
-		# Returns true when one document is active in the current engine or session.
-		def active_document?(document)
-			return @engine.active_document?(document) if @engine.respond_to?(:active_document?)
-
-			true
 		end
 	end
 end

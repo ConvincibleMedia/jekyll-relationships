@@ -6,6 +6,17 @@ module Plugins
 module Relationships
 module Resolvers
 
+# Declares or reads the global default persistence mode for resolver link calls.
+#
+# Resolver classes can override this locally with their own `persist true/false`
+# declaration. When left unset on the class, `link(...)` falls back to this
+# module-wide default.
+def self.persist(value = :__read__)
+	return Base.global_persist_default if value == :__read__
+
+	Base.global_persist_default = value
+end
+
 # Base class for custom relationship resolvers.
 #
 # Subclass this in `_plugins`, declare `from` and `to`, then implement
@@ -14,6 +25,7 @@ module Resolvers
 class Base
 
 	@registered_subclasses = []
+	@global_persist_default = false
 
 	class << self
 		attr_reader :from_definition, :to_definition
@@ -42,6 +54,35 @@ class Base
 			@to_definition
 		end
 
+		# Declares or reads the default persistence mode for this resolver class.
+		def persist(value = :__read__)
+			unless value == :__read__
+				@persist_default = normalise_persist_default(
+					value,
+					context: "#{name || self}.persist"
+				)
+			end
+			return @persist_default unless @persist_default.nil?
+			return superclass.persist if self != Base && superclass.respond_to?(:persist)
+
+			global_persist_default
+		end
+
+		# Returns the module-wide fallback persistence mode.
+		def global_persist_default
+			return false unless instance_variable_defined?(:@global_persist_default)
+
+			@global_persist_default
+		end
+
+		# Sets the module-wide fallback persistence mode.
+		def global_persist_default=(value)
+			@global_persist_default = normalise_persist_default(
+				value,
+				context: 'Resolvers.persist'
+			)
+		end
+
 		# Returns every resolver subclass whose `from` and `to` selectors are complete.
 		def registered_subclasses
 			@registered_subclasses ||= []
@@ -59,6 +100,15 @@ class Base
 		# Removes one resolver subclass from the shared registry while declaration is incomplete.
 		def remove_registered_subclass(subclass:)
 			registered_subclasses.delete(subclass)
+		end
+
+		private
+
+		# Normalises one resolver persistence default to a strict boolean.
+		def normalise_persist_default(value, context:)
+			return value if value == true || value == false
+
+			raise ConfigurationError, "`#{context}` must be true or false."
 		end
 	end
 
@@ -159,11 +209,15 @@ class Base
 	end
 
 	# Adds one relationship from the current document to the target collection.
-	def link(target_reference, reference: nil)
+	#
+	# When `persist` is true, the link may be restored in later rounds if the
+	# resolver does not recreate it and both linked documents still survive.
+	def link(target_reference, reference: nil, persist: nil)
 		@state.link(
 			target_reference,
 			metadata: reference,
-			origin: "resolver #{self.class.name || self.class}"
+			origin: "resolver #{self.class.name || self.class}",
+			persist: persist.nil? ? self.class.persist : persist
 		)
 	end
 

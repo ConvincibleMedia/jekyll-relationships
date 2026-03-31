@@ -152,6 +152,399 @@ RSpec.describe 'relationship resolvers' do
 		end
 	end
 
+	it 'can keep a persisted resolver link after the intermediary document is pruned in a later round' do
+		define_resolver('ProjectServicesViaClientsPersisted', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service, persist: true)
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{
+					'from' => 'projects',
+					'to' => 'services',
+					'prune' => {
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'services' => ['services/design']
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+
+			expect(site.collections.fetch('clients').docs).to eq([])
+			expect(site.collections.fetch('projects').docs.map(&:basename_without_ext)).to eq(['alpha'])
+			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq(['services/design'])
+		end
+	end
+
+	it 'can use a global resolver persistence default for link calls' do
+		Jekyll::Plugins::Relationships::Resolvers.persist(true)
+
+		define_resolver('ProjectServicesViaClientsGlobalPersistDefault', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service)
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{
+					'from' => 'projects',
+					'to' => 'services',
+					'prune' => {
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'services' => ['services/design']
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+
+			expect(site.collections.fetch('clients').docs).to eq([])
+			expect(site.collections.fetch('projects').docs.map(&:basename_without_ext)).to eq(['alpha'])
+			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq(['services/design'])
+		end
+	end
+
+	it 'can use a resolver-class persistence default for link calls in that resolver only' do
+		define_resolver('ProjectServicesViaClientsClassPersistDefault', from: 'projects', to: 'services') do
+			persist true
+
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service)
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{
+					'from' => 'projects',
+					'to' => 'services',
+					'prune' => {
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'services' => ['services/design']
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+
+			expect(site.collections.fetch('clients').docs).to eq([])
+			expect(site.collections.fetch('projects').docs.map(&:basename_without_ext)).to eq(['alpha'])
+			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq(['services/design'])
+		end
+	end
+
+	it 'lets a resolver-class persistence default override a global resolver default' do
+		Jekyll::Plugins::Relationships::Resolvers.persist(true)
+
+		define_resolver('ProjectServicesViaClientsLocalPersistOverride', from: 'projects', to: 'services') do
+			persist false
+
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service)
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{
+					'from' => 'projects',
+					'to' => 'services',
+					'prune' => {
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'services' => ['services/design']
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('clients').docs).to eq([])
+			expect(site.collections.fetch('projects').docs).to eq([])
+		end
+	end
+
+	it 'does not duplicate a persisted link when the resolver naturally recreates it in a later round' do
+		define_resolver('ProjectServicesViaClientsPersistedKeepMode', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service, persist: true)
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'multiple' => 'keep',
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/kept']
+				}
+			}),
+			collection_document('clients', 'kept', {
+				'relationships' => {
+					'services' => ['services/design'],
+					'badges' => ['badges/active']
+				}
+			}),
+			collection_document('clients', 'pruned'),
+			collection_document('services', 'design'),
+			collection_document('badges', 'active')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+
+			expect(site.collections.fetch('clients').docs.map(&:basename_without_ext)).to eq(['kept'])
+			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq(['services/design'])
+		end
+	end
+
+	it 'stops reapplying a persisted link after an explicit unlink clears it' do
+		define_resolver('ProjectServicesPersistedThenCleared', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service, persist: true)
+					end
+				end
+				unlink('services/design') if relationships(to: 'clients').empty?
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'services' => ['services/design']
+				}
+			}),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+
+			expect(site.collections.fetch('clients').docs).to eq([])
+			expect(project.data.fetch('relationships').fetch('services')).to eq([])
+		end
+	end
+
+	it 'reapplies a missing persisted link near its earlier proportional position' do
+		define_resolver('ProjectServicesSelectivePersistence', from: 'projects', to: 'services') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'services').each do |service|
+						link(service, persist: service.fetch('id') == 'services/centre')
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'services' },
+				{
+					'from' => 'clients',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'projects', 'to' => 'services' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/left', 'clients/centre', 'clients/right']
+				}
+			}),
+			collection_document('clients', 'left', {
+				'relationships' => {
+					'services' => ['services/left'],
+					'badges' => ['badges/active']
+				}
+			}),
+			collection_document('clients', 'centre', {
+				'relationships' => {
+					'services' => ['services/centre']
+				}
+			}),
+			collection_document('clients', 'right', {
+				'relationships' => {
+					'services' => ['services/right'],
+					'badges' => ['badges/active']
+				}
+			}),
+			collection_document('services', 'left'),
+			collection_document('services', 'centre'),
+			collection_document('services', 'right'),
+			collection_document('badges', 'active')
+		)
+
+		build_relationship_site(collections: %w[projects clients services badges], relationships: relationships, files: files) do |site, _files|
+			project = document_for(site, 'projects', 'alpha')
+
+			expect(site.collections.fetch('clients').docs.map(&:basename_without_ext)).to eq(%w[left right])
+			expect(reference_ids(project.data.fetch('relationships').fetch('services'))).to eq([
+				'services/left',
+				'services/centre',
+				'services/right'
+			])
+		end
+	end
+
 	it 'can inspect the current link state while resolving and build on top of it' do
 		define_resolver('CurrentStateReader', from: 'projects', to: 'services') do
 			def resolve

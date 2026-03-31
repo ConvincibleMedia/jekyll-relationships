@@ -173,7 +173,7 @@ RSpec.describe 'normal relationships' do
 		expect(debug_messages).not_to include(a_string_including('[debug:resolution]'))
 	end
 
-	it 'counts duplicate links gathered from multiple input paths and rewrites the final set onto the first path' do
+	it 'counts duplicate links gathered from multiple input paths and rewrites the final set onto the first path only' do
 		define_resolver('FirstPathDeduper', from: 'products', to: 'categories') do
 			def resolve
 				link('categories/extra', reference: { 'source' => 'resolver' })
@@ -225,8 +225,7 @@ RSpec.describe 'normal relationships' do
 			expect(reference_values(primary_links, 'count')).to eq([2, 2, 1, 1])
 			expect(primary_links[1].fetch('note')).to eq('first-seen-here')
 			expect(primary_links.last.fetch('source')).to eq('resolver')
-			expect(reference_ids(secondary_links)).to eq(['categories/two', 'categories/three'])
-			expect(reference_values(secondary_links, 'count')).to eq([1, 1])
+			expect(secondary_links).to eq(['categories/two', 'categories/three'])
 		end
 	end
 
@@ -266,8 +265,8 @@ RSpec.describe 'normal relationships' do
 			product = document_for(site, 'products', 'alpha')
 			data = product.data.fetch('data')
 
-			expect(reference_ids(data.fetch('primary').fetch('categories'))).to eq(['categories/one'])
-			expect(reference_ids(data.fetch('secondary'))).to eq(['categories/two'])
+			expect(data.fetch('primary').fetch('categories')).to eq(['categories/one'])
+			expect(data.fetch('secondary')).to eq(['categories/two'])
 			expect(reference_ids(data.fetch('resolved').fetch('categories'))).to eq([
 				'categories/one',
 				'categories/two',
@@ -277,7 +276,7 @@ RSpec.describe 'normal relationships' do
 		end
 	end
 
-	it 'upgrades array-expanded raw references surgically while writing consolidated output elsewhere' do
+	it 'leaves array-expanded raw references untouched while writing consolidated output elsewhere' do
 		define_resolver('ArrayExpandedProjectAdder', from: 'projects', to: 'projects') do
 			def resolve
 				link('project-gamma', reference: { 'source' => 'resolver' })
@@ -356,12 +355,14 @@ RSpec.describe 'normal relationships' do
 			second_project = body[1].fetch('imagery').fetch('project')
 			resolved_projects = project.data.fetch('data').fetch('resolved').fetch('projects')
 
-			expect(reference_ids(first_project)).to eq(['project-beta'])
-			expect(reference_ids(second_project)).to eq(['project-delta'])
-			expect(first_project.fetch('caption')).to eq('hero')
-			expect(second_project.fetch('caption')).to eq('support')
-			expect(first_project.fetch('collection')).to eq('projects')
-			expect(second_project.fetch('collection')).to eq('projects')
+			expect(first_project).to eq({
+				'id' => 'project-beta',
+				'caption' => 'hero'
+			})
+			expect(second_project).to eq({
+				'id' => 'project-delta',
+				'caption' => 'support'
+			})
 			expect(body[1].fetch('layout')).to eq({ 'variant' => 'wide' })
 			expect(body[2]).to eq({
 				'block_type' => 'text',
@@ -414,7 +415,7 @@ RSpec.describe 'normal relationships' do
 		)
 	end
 
-	it 'allows array-expanded input paths when the consolidated write target remains a simple path' do
+	it 'allows array-expanded input paths when only the first input path receives the consolidated output' do
 		define_resolver('PrimaryPathProjectAdder', from: 'projects', to: 'projects') do
 			def resolve
 				link('project-gamma')
@@ -470,9 +471,10 @@ RSpec.describe 'normal relationships' do
 				'project-delta',
 				'project-gamma'
 			])
-			expect(reference_ids(body_project)).to eq(['project-delta'])
-			expect(body_project.fetch('caption')).to eq('body block')
-			expect(body_project.fetch('collection')).to eq('projects')
+			expect(body_project).to eq({
+				'id' => 'project-delta',
+				'caption' => 'body block'
+			})
 		end
 	end
 
@@ -564,6 +566,77 @@ RSpec.describe 'normal relationships' do
 			expect(reference_ids(product.data.fetch('relationships').fetch('services'))).to eq(['services/strategy'])
 			expect(design.data.fetch('relationships').fetch('products')).to eq([])
 			expect(reference_ids(strategy.data.fetch('relationships').fetch('products'))).to eq(['products/alpha'])
+		end
+	end
+
+	it 'keeps quote frontmatter links ahead of service resolver additions in bidirectional mode' do
+		define_resolver('ProjectServicesQuoteOrderProbe', from: 'projects', to: 'services') do
+			def resolve
+				# Force services -> quotes to resolve while the build is still walking
+				# the project graph, before the quotes collection is resolved in the
+				# normal top-level pass.
+				relationships.each do |service|
+					relationships(service, to: 'quotes')
+				end
+			end
+		end
+
+		define_resolver('QuoteServices', from: 'services', to: 'quotes') do
+			def resolve
+				relationships(to: 'projects').each do |project|
+					relationships(project, to: 'clients').each do |client|
+						relationships(client, to: 'quotes').each do |quote|
+							link(quote)
+						end
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'projects', 'to' => 'services', 'mode' => 'bidirectional' },
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'clients', 'to' => 'quotes' },
+				{
+					'from' => 'quotes',
+					'to' => 'services',
+					'mode' => 'bidirectional',
+					'frontmatter' => {
+						'base' => '',
+						'foreign' => 'data.related_services',
+						'output' => 'relationships.<collection>'
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'services' => ['services/design'],
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'quotes' => ['quotes/derived']
+				}
+			}),
+			collection_document('quotes', 'direct', {
+				'data' => {
+					'related_services' => ['services/design']
+				}
+			}),
+			collection_document('quotes', 'derived'),
+			collection_document('services', 'design')
+		)
+
+		build_relationship_site(collections: %w[projects clients quotes services], relationships: relationships, files: files) do |site, _files|
+			service = document_for(site, 'services', 'design')
+			references = service.data.fetch('relationships').fetch('quotes')
+
+			expect(reference_ids(references)).to eq(['quotes/direct', 'quotes/derived'])
 		end
 	end
 

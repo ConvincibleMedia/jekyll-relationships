@@ -280,12 +280,12 @@ RSpec.describe 'pruning' do
 		end
 	end
 
-	it 'preserves previously resolved links while rerunning normal resolvers after pruning changes the active tree' do
+	it 'preserves explicitly persisted links while rerunning normal resolvers after pruning changes the active tree' do
 		define_resolver('AncestorServiceLinker', from: 'pages', to: 'services') do
 			def resolve
 				ancestors.each do |ancestor|
 					relationships(ancestor, to: 'services').each do |service|
-						link(service)
+						link(service, persist: true)
 					end
 				end
 			end
@@ -337,12 +337,93 @@ RSpec.describe 'pruning' do
 		end
 	end
 
-	it 'preserves surviving resolver-added links after inverse normal pruning removes their raw source links' do
+	it 'keeps direct bidirectional links ahead of resolver additions during prune reruns in count mode' do
+		define_resolver('ProjectServicesQuoteOrderProbe', from: 'projects', to: 'services') do
+			def resolve
+				relationships.each do |service|
+					relationships(service, to: 'quotes')
+				end
+			end
+		end
+
+		define_resolver('QuoteServices', from: 'services', to: 'quotes') do
+			def resolve
+				relationships(to: 'projects').each do |project|
+					relationships(project, to: 'clients').each do |client|
+						relationships(client, to: 'quotes').each do |quote|
+							link(quote)
+						end
+					end
+				end
+			end
+		end
+
+		relationships = {
+			'multiple' => {
+				'mode' => 'count'
+			},
+			'relationships' => [
+				{
+					'from' => 'projects',
+					'to' => 'services',
+					'mode' => 'bidirectional',
+					'prune' => {
+						'min' => 1
+					}
+				},
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'clients', 'to' => 'quotes' },
+				{
+					'from' => 'quotes',
+					'to' => 'services',
+					'mode' => 'bidirectional',
+					'frontmatter' => {
+						'base' => '',
+						'foreign' => 'data.related_services',
+						'output' => 'relationships.<collection>'
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'services' => ['services/branding'],
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'quotes' => ['quotes/derived-one', 'quotes/derived-two', 'quotes/derived-three']
+				}
+			}),
+			collection_document('quotes', 'direct', {
+				'data' => {
+					'related_services' => ['services/branding']
+				}
+			}),
+			collection_document('quotes', 'derived-one'),
+			collection_document('quotes', 'derived-two'),
+			collection_document('quotes', 'derived-three'),
+			collection_document('services', 'branding')
+		)
+
+		build_relationship_site(collections: %w[projects clients quotes services], relationships: relationships, files: files) do |site, _files|
+			service = document_for(site, 'services', 'branding')
+			references = service.data.fetch('relationships').fetch('quotes')
+
+			expect(reference_ids(references)).to eq(['quotes/direct', 'quotes/derived-one', 'quotes/derived-two', 'quotes/derived-three'])
+			expect(reference_values(references, 'count')).to eq([1, 1, 1, 1])
+		end
+	end
+
+	it 'preserves explicitly persisted resolver-added links after inverse normal pruning removes their raw source links' do
 		define_resolver('ClientIndustryAncestors', from: 'clients', to: 'industries') do
 			def resolve
 				relationships.each do |industry|
 					ancestors(industry).each do |ancestor|
-						link(ancestor, reference: { 'distance' => ancestor.fetch('distance') })
+						link(ancestor, reference: { 'distance' => ancestor.fetch('distance') }, persist: true)
 					end
 				end
 			end
@@ -388,12 +469,12 @@ RSpec.describe 'pruning' do
 		end
 	end
 
-	it 'upgrades untouched ingestion paths with the configured primary path after snapshot-seeded resolution' do
+	it 'leaves separate ingestion paths untouched with the configured primary path after seed-graph resolution' do
 		define_resolver('PrimaryPathClientIndustryAncestors', from: 'clients', to: 'industries') do
 			def resolve
 				relationships.each do |industry|
 					ancestors(industry).each do |ancestor|
-						link(ancestor, reference: { 'distance' => ancestor.fetch('distance') })
+						link(ancestor, reference: { 'distance' => ancestor.fetch('distance') }, persist: true)
 					end
 				end
 			end
@@ -464,8 +545,63 @@ RSpec.describe 'pruning' do
 
 		build_relationship_site(collections: %w[clients industries projects], relationships: relationships, files: files) do |site, _files|
 			client = document_for(site, 'clients', 'beckett-rankine')
-			expect(client.data.fetch('data').fetch('industries')).to eq([])
+			expect(client.data.fetch('data').fetch('industries')).to eq([
+				{
+					'id' => 'industry-architecture',
+					'slug' => 'architecture',
+					'title' => 'Architecture',
+					'type' => 'industry'
+				}
+			])
 			expect(reference_ids(client.data.fetch('meta').fetch('links').fetch('industries'))).to eq(['industry-professional-services'])
+		end
+	end
+
+	it 'rebuilds the tree from the updated seed after normal pruning removes a parent node' do
+		relationships = {
+			'prune' => {
+				'tree' => {
+					'orphans' => 'grandparents'
+				}
+			},
+			'relationships' => [
+				{ 'from' => 'categories', 'to' => 'self', 'mode' => 'parent' },
+				{
+					'from' => 'categories',
+					'to' => 'badges',
+					'prune' => {
+						'min' => 1
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('categories', 'root', {
+				'relationships' => {
+					'badges' => ['badges/root']
+				}
+			}),
+			collection_document('categories', 'parent', {
+				'relationships' => {
+					'parent' => 'categories/root'
+				}
+			}),
+			collection_document('categories', 'child', {
+				'relationships' => {
+					'parent' => 'categories/parent',
+					'badges' => ['badges/child']
+				}
+			}),
+			collection_document('badges', 'root'),
+			collection_document('badges', 'child')
+		)
+
+		build_relationship_site(collections: %w[categories badges], relationships: relationships, files: files) do |site, _files|
+			child = document_for(site, 'categories', 'child')
+
+			expect(site.collections.fetch('categories').docs.map(&:basename_without_ext)).to eq(%w[child root])
+			expect(reference_ids(child.data.fetch('relationships').fetch('parents'))).to eq(['categories/root'])
 		end
 	end
 
@@ -741,7 +877,7 @@ RSpec.describe 'pruning' do
 			def resolve
 				ancestors.each do |ancestor|
 					relationships(ancestor, to: 'services').each do |service|
-						link(service)
+						link(service, persist: true)
 					end
 				end
 			end

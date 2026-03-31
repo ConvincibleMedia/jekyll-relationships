@@ -376,7 +376,7 @@ RSpec.describe 'ultimate linked-site scenario' do
 				'deliverable-launch',
 				'deliverable-foundation'
 			])
-			expect(reference_ids(project_data.fetch('body').fetch('details').fetch('deliverables'))).to eq(['deliverable-launch'])
+			expect(project_data.fetch('body').fetch('details').fetch('deliverables')).to eq(['deliverable-launch'])
 			expect(reference_ids(project_data.fetch('client'))).to eq(['client-acme'])
 			expect(reference_ids(project_data.fetch('resolved').fetch('services'))).to eq([
 				'service-content',
@@ -391,8 +391,8 @@ RSpec.describe 'ultimate linked-site scenario' do
 
 			article_data = article.data.fetch('data')
 			expect(reference_ids(article_data.fetch('related').fetch('projects'))).to eq(['project-phoenix'])
-			expect(reference_ids(article_data.fetch('body').fetch('details').fetch('projects'))).to eq(['project-legacy'])
-			expect(reference_ids(article_data.fetch('related').fetch('client'))).to eq(['client-acme'])
+			expect(article_data.fetch('body').fetch('details').fetch('projects')).to eq(['project-legacy'])
+			expect(article_data.fetch('related').fetch('client')).to eq('client-acme')
 			expect(reference_ids(article_data.fetch('resolved').fetch('clients'))).to eq(['client-acme'])
 			expect(reference_ids(article_data.fetch('resolved').fetch('services'))).to eq([
 				'service-content',

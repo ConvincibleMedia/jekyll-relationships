@@ -30,21 +30,39 @@ class Accumulator
 
 	# Adds one resolved relationship entry and returns how it changed the set.
 	def add_result(document:, key:, metadata: nil, count: 1)
+		add_detailed_result(
+			document: document,
+			key: key,
+			metadata: metadata,
+			count: count
+		).fetch(:action)
+	end
+
+	# Adds one resolved relationship entry and returns the stored entry as well.
+	def add_detailed_result(document:, key:, metadata: nil, count: 1)
 		if @multiple_settings.keep?
-			append_entry(document: document, key: key, metadata: metadata, count: 1)
-			return :added
+			return {
+				action: :added,
+				entry: append_entry(document: document, key: key, metadata: metadata, count: 1)
+			}
 		end
 
 		existing_entry = @entries_by_document_id[document.object_id]
 		if existing_entry
-			return :ignored if @multiple_settings.drop?
+			return {
+				action: :ignored,
+				entry: existing_entry
+			} if @multiple_settings.drop?
 
 			existing_entry[:count] += normalise_count(count)
 			existing_entry[:metadata] = merge_metadata_under(
 				existing_metadata: existing_entry[:metadata],
 				incoming_metadata: metadata
 			)
-			return :merged
+			return {
+				action: :merged,
+				entry: existing_entry
+			}
 		end
 
 		entry = append_entry(
@@ -54,7 +72,10 @@ class Accumulator
 			count: counted_mode? ? normalise_count(count) : 1
 		)
 		@entries_by_document_id[document.object_id] = entry
-		:added
+		{
+			action: :added,
+			entry: entry
+		}
 	end
 
 	# Removes every stored occurrence of one target document.
@@ -97,6 +118,35 @@ class Accumulator
 		materialised_entries.map do |entry|
 			build_reference(entry)
 		end
+	end
+
+	# Repositions newly reinserted entries by proportional target slot.
+	def reposition_entries!(reinsertions:, base_count:)
+		return if reinsertions.empty?
+
+		reinsertions_by_entry_id = reinsertions.each_with_object({}) do |reinsertion, indexed_reinsertions|
+			indexed_reinsertions[reinsertion.fetch(:entry).object_id] = reinsertion
+		end
+		base_entries = @entries.reject do |entry|
+			reinsertions_by_entry_id.key?(entry.object_id)
+		end
+		slots = Hash.new { |hash, key| hash[key] = [] }
+		reinsertions.sort_by do |reinsertion|
+			[
+				reinsertion.fetch(:position_ratio).nil? ? Float::INFINITY : reinsertion.fetch(:position_ratio),
+				reinsertion.fetch(:order)
+			]
+		end.each do |reinsertion|
+			slots[insertion_index(position_ratio: reinsertion.fetch(:position_ratio), base_count: base_count)] << reinsertion.fetch(:entry)
+		end
+
+		rebuilt_entries = []
+		0.upto(base_entries.length) do |index|
+			rebuilt_entries.concat(slots[index]) if slots.key?(index)
+			rebuilt_entries << base_entries[index] if index < base_entries.length
+		end
+		@entries = rebuilt_entries
+		reindex_entries!
 	end
 
 	private
@@ -175,6 +225,22 @@ class Accumulator
 		raise ResolutionError, "Relationship count `#{count.inspect}` must be a positive integer." if integer_count < 1
 
 		integer_count
+	end
+
+	# Converts one persisted proportional hint into an insertion slot.
+	def insertion_index(position_ratio:, base_count:)
+		return base_count if position_ratio.nil?
+		return 0 if base_count <= 0
+
+		[[0, (position_ratio * base_count).round].max, base_count].min
+	end
+
+	# Rewrites first-seen indexes after persisted reinsertion changes the order.
+	def reindex_entries!
+		@entries.each_with_index do |entry, index|
+			entry[:first_seen_index] = index
+		end
+		@next_position = @entries.length
 	end
 end
 

@@ -24,6 +24,7 @@ spec/reports
 # Settings
 .vscode
 agents.md
+.codex
 
 # Gem
 pkg

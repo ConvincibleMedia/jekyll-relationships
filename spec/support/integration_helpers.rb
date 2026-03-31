@@ -153,7 +153,9 @@ RSpec.configure do |config|
 
 	config.around do |example|
 		original_registry = Jekyll::Plugins::Relationships::Resolvers::Base.registered_subclasses.dup
+		original_global_persist_default = Jekyll::Plugins::Relationships::Resolvers::Base.global_persist_default
 		example.run
 		Jekyll::Plugins::Relationships::Resolvers::Base.instance_variable_set(:@registered_subclasses, original_registry)
+		Jekyll::Plugins::Relationships::Resolvers::Base.global_persist_default = original_global_persist_default
 	end
 end

@@ -20,7 +20,7 @@ class Engine
 			@document = document
 			@definition = definition
 			@status = :unseen
-			@raw_seeded = false
+			@seeded = false
 			@links = Jekyll::Plugins::Relationships::References::Accumulator.new(
 				reference_template: @engine.configuration.reference_template,
 				multiple_settings: @engine.configuration.multiple_settings
@@ -37,6 +37,16 @@ class Engine
 			@status == :resolved
 		end
 
+		# Seeds the state from the normal seed graph once, without running resolvers.
+		def ensure_seeded!
+			seed_initial_links!
+		end
+
+		# Returns true when one document is active in this session.
+		def active_document?(document = @document)
+			@engine.active_document?(document)
+		end
+
 		# Resolves the state unless it has already been handled.
 		def resolve!
 			return if resolved?
@@ -50,8 +60,10 @@ class Engine
 				bidirectional: @definition.bidirectional,
 				resolvers: @definition.resolver_classes.map { |resolver_class| @engine.debug_logger.resolver_name(resolver_class) }
 			})
-			seed_initial_links!
+			ensure_seeded!
 			run_resolvers!
+			@engine.reapply_persisted_links(state: self)
+			@engine.refresh_persisted_positions(state: self)
 			@status = :resolved
 			debug('resolution', 'resolve_finish', {
 				references: current_references
@@ -59,7 +71,7 @@ class Engine
 		end
 
 		# Adds one link to the state and mirrors it when required.
-		def link(reference, metadata: nil, count: 1, reflect: true, origin: 'resolver')
+		def link(reference, metadata: nil, count: 1, reflect: true, origin: 'resolver', persist: false)
 			target_document = @engine.resolve_reference_document(
 				reference,
 				primary_path: @definition.primary_path,
@@ -74,35 +86,49 @@ class Engine
 					count: count,
 					metadata: sanitised_metadata(metadata)
 				})
-				return
+				return {
+					action: :inactive,
+					entry: nil,
+					target_document: target_document
+				}
 			end
 			unless target_document.collection.label == @definition.to_collection
 				raise ResolutionError, "Resolver attempted to link `#{target_document.relative_path}` outside the allowed target collection `#{@definition.to_collection}`."
 			end
 
-			action = @links.add_result(
+			result = @links.add_detailed_result(
 				document: target_document,
 				key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
 				metadata: sanitised_metadata(metadata),
 				count: count
 			)
 			debug('mutations', 'link', {
-				action: action,
+				action: result.fetch(:action),
 				origin: origin,
 				target: target_document,
 				target_key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
 				count: count,
 				metadata: sanitised_metadata(metadata)
 			})
-			return if action == :ignored
-			return unless reflect && @definition.bidirectional
+			if persist && result.fetch(:action) != :ignored
+				@engine.persist_link(
+					source_state: self,
+					target_document: target_document,
+					metadata: metadata,
+					count: count
+				)
+			end
+			if reflect && @definition.bidirectional && result.fetch(:action) != :ignored
+				@engine.mirror_add(source_state: self, target_document: target_document, metadata: metadata, count: count)
+			end
 
-			@engine.mirror_add(source_state: self, target_document: target_document, metadata: metadata, count: count)
+			result.merge(target_document: target_document)
 		end
 
 		# Removes one link, or every link when no reference is given.
-		def unlink(reference = nil, reflect: true, origin: 'resolver')
+		def unlink(reference = nil, reflect: true, origin: 'resolver', clear_persisted: true)
 			if reference.nil?
+				@engine.clear_all_persisted_links(source_state: self) if clear_persisted
 				if current_link_entries.empty?
 					debug('mutations', 'unlink_all', {
 						action: :missing,
@@ -121,6 +147,7 @@ class Engine
 				primary_path: @definition.primary_path,
 				collection_hint: @definition.to_collection
 			)
+			@engine.clear_persisted_link(source_state: self, target_document: target_document) if clear_persisted
 			remove_document(document: target_document, reflect: reflect, origin: origin)
 		end
 
@@ -134,81 +161,28 @@ class Engine
 			@links.encounter_entries
 		end
 
+		# Repositions reinserted persisted entries after they have been added.
+		def reposition_entries!(reinsertions:, base_count:)
+			@links.reposition_entries!(reinsertions: reinsertions, base_count: base_count)
+		end
+
 		private
 
-		# Seeds the state either from the previous in-memory graph or from raw
-		# frontmatter during the initial ingestion pass.
+		# Seeds the state from the source-derived normal seed graph.
 		def seed_initial_links!
-			return if @raw_seeded
+			return if @seeded
 
-			snapshot_entries = @engine.relationship_snapshot_for(@document, @definition.to_collection)
-			if snapshot_entries.nil?
-				seed_raw_links!
-			else
-				seed_snapshot_links!(snapshot_entries)
-			end
-
-			@raw_seeded = true
-		end
-
-		# Seeds the state from raw frontmatter once.
-		def seed_raw_links!
-			return unless @definition.reads_frontmatter
-
-			@definition.foreign_paths.each do |path|
-				raw_state = @engine.raw_path_state(@document, path)
-				debug('upgrading', 'raw_path', {
-					path: path,
-					present: raw_state.present?,
-					value: raw_state.raw_value
-				})
-				next unless raw_state.present?
-
-				resolved_entries = raw_state.resolved_entries_for(
-					primary_path: @definition.primary_path,
-					registry: @engine.registry,
-					active_document_checker: proc { |resolved_document| @engine.active_document?(resolved_document) }
-				)
-				debug('upgrading', 'raw_path_resolved', {
-					path: path,
-					entries: resolved_entries.compact
-				})
-
-				resolved_entries.each do |entry|
-					next unless entry
-					if entry.fetch(:document).collection.label != @definition.to_collection
-						debug('upgrading', 'raw_path_skipped', {
-							path: path,
-							target: entry.fetch(:document),
-							target_key: entry.fetch(:key),
-							actual_collection: entry.fetch(:document).collection.label,
-							expected_collection: @definition.to_collection
-						})
-						next
-					end
-
-					link(
-						entry.fetch(:document),
-						metadata: entry.fetch(:metadata),
-						count: entry.fetch(:count),
-						reflect: @definition.bidirectional,
-						origin: "frontmatter #{path}"
-					)
-				end
-			end
-		end
-
-		# Seeds the state from one previous session's resolved link set.
-		def seed_snapshot_links!(entries)
-			Array(entries).each do |entry|
+			@engine.seed_entries_for(@document, @definition.to_collection).each do |entry|
 				link(
 					entry.fetch(:document),
 					metadata: entry.fetch(:metadata),
 					count: entry.fetch(:count),
-					reflect: @definition.bidirectional,
-					origin: 'session snapshot'
+					reflect: false,
+					origin: 'seed graph',
+					persist: false
 				)
 			end
+			@seeded = true
 		end
 
 		# Instantiates and runs every configured resolver class.

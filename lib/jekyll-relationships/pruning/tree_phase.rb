@@ -125,20 +125,14 @@ class TreePhase
 		@provenance = provenance
 	end
 
-	# Builds the pruned tree graph for one active document set.
-	def process(active_document_ids:)
-		current_active_document_ids = active_document_ids.dup
+	# Resolves tree pruning against one concrete tree seed graph.
+	def process(seed_graph:)
+		current_tree_graph = seed_graph.deep_dup
 		removed_documents = []
-		@current_active_document_ids = active_document_lookup(current_active_document_ids)
-		orphan_result = stabilise_orphans!(
-			current_active_document_ids: current_active_document_ids,
-			removed_documents: removed_documents
-		)
-		current_tree_graph = orphan_result.fetch(:graph)
+		stabilise_orphans!(graph: current_tree_graph, removed_documents: removed_documents)
 		return {
-			tree_graph: current_tree_graph,
-			active_document_ids: current_active_document_ids,
-			removed_documents: removed_documents
+			graph: current_tree_graph,
+			removed_documents: unique_documents(removed_documents)
 		} if @configuration.tree_prune_rules.empty?
 
 		eligible_document_ids_by_rule = eligible_document_ids_by_rule(graph: current_tree_graph)
@@ -150,57 +144,57 @@ class TreePhase
 			)
 			if pruned_documents.empty?
 				return {
-					tree_graph: current_tree_graph,
-					active_document_ids: current_active_document_ids,
-					removed_documents: removed_documents
+					graph: current_tree_graph,
+					removed_documents: unique_documents(removed_documents)
 				}
 			end
 
-			remove_documents!(
-				current_active_document_ids: current_active_document_ids,
-				documents: pruned_documents
-			)
+			current_tree_graph.remove_documents!(pruned_documents)
 			removed_documents.concat(pruned_documents)
-			current_tree_graph = stabilise_orphans!(
-				current_active_document_ids: current_active_document_ids,
-				removed_documents: removed_documents
-			).fetch(:graph)
+			stabilise_orphans!(graph: current_tree_graph, removed_documents: removed_documents)
 		end
+	end
+
+	# Applies committed removals to one tree seed graph and repairs the tree.
+	#
+	# The tree seed only changes because documents have permanently died. Resolver
+	# output never flows back into the seed, but structural repair such as orphan
+	# reattachment must be reflected so the next round starts from the right tree.
+	def apply_seed_removals(seed_graph:, documents:)
+		documents_to_remove = Array(documents).select do |document|
+			seed_graph.participating?(document) && seed_graph.active_document?(document)
+		end
+		return {
+			seed_graph: seed_graph,
+			removed_documents: [],
+			seed_changed: false
+		} if documents_to_remove.empty?
+
+		next_seed_graph = seed_graph.deep_dup
+		removed_documents = documents_to_remove.select do |document|
+			next_seed_graph.remove_document!(document)
+		end
+		stabilise_orphans!(graph: next_seed_graph, removed_documents: removed_documents)
+
+		{
+			seed_graph: next_seed_graph,
+			removed_documents: unique_documents(removed_documents),
+			seed_changed: removed_documents.any?
+		}
 	end
 
 	private
 
-	# Rebuilds the tree graph until orphan handling no longer removes documents.
-	def stabilise_orphans!(current_active_document_ids:, removed_documents:)
+	# Removes or reattaches orphans until the graph stabilises.
+	def stabilise_orphans!(graph:, removed_documents:)
 		loop do
-			@current_active_document_ids = active_document_lookup(current_active_document_ids)
-			base_graph = build_tree_graph(active_document_ids: current_active_document_ids)
-			orphan_result = apply_orphan_policy(graph: base_graph)
+			orphan_result = apply_orphan_policy(graph: graph)
 			orphaned_documents = orphan_result.fetch(:removed_documents)
-			return {
-				graph: orphan_result.fetch(:graph)
-			} if orphaned_documents.empty?
+			return graph if orphaned_documents.empty?
 
-			remove_documents!(
-				current_active_document_ids: current_active_document_ids,
-				documents: orphaned_documents
-			)
+			graph.remove_documents!(orphaned_documents)
 			removed_documents.concat(orphaned_documents)
 		end
-	end
-
-	# Builds one fresh tree graph for the current active document set.
-	def build_tree_graph(active_document_ids:)
-		tree_graph = Trees::Graph.new(
-			site: @engine.site,
-			configuration: @configuration,
-			registry: @engine.registry,
-			data_path: @engine.data_path,
-			debug_logger: @engine.debug_logger,
-			active_document_ids: active_document_ids
-		)
-		tree_graph.build!
-		tree_graph
 	end
 
 	# Builds one stable lookup of which documents each tree rule may prune.
@@ -264,21 +258,6 @@ class TreePhase
 		end
 	end
 
-	# Removes many documents from the current active set in place.
-	def remove_documents!(current_active_document_ids:, documents:)
-		Array(documents).each do |document|
-			current_active_document_ids.delete(document.object_id)
-			@current_active_document_ids.delete(document.object_id)
-		end
-	end
-
-	# Builds one fast active-document lookup for the current build state.
-	def active_document_lookup(active_document_ids)
-		active_document_ids.each_with_object({}) do |document_id, active_ids|
-			active_ids[document_id] = true
-		end
-	end
-
 	# Applies the configured orphan policy to one current tree graph.
 	def apply_orphan_policy(graph:)
 		removed_documents = []
@@ -309,7 +288,7 @@ class TreePhase
 
 	# Attempts to reconnect one orphan to its surviving original grandparents.
 	def reattach_orphan!(graph:, document:)
-		grandparent_candidates_for(document).each do |candidate|
+		grandparent_candidates_for(graph: graph, document: document).each do |candidate|
 			graph.add_edge(
 				parent_document: candidate.fetch(:document),
 				child_document: document,
@@ -323,11 +302,11 @@ class TreePhase
 	end
 
 	# Returns every surviving grandparent candidate for one orphan.
-	def grandparent_candidates_for(document)
+	def grandparent_candidates_for(graph:, document:)
 		@provenance.original_parent_entries_for(document).each_with_object({}) do |parent_entry, candidates|
 			@provenance.original_parent_entries_for(parent_entry.fetch(:document)).each do |grandparent_entry|
 				grandparent_document = grandparent_entry.fetch(:document)
-				next unless current_document?(grandparent_document)
+				next unless graph.active_document?(grandparent_document)
 
 				candidates[grandparent_document.object_id] ||= {
 					document: grandparent_document,
@@ -338,9 +317,11 @@ class TreePhase
 		end.values
 	end
 
-	# Returns true when one document is still active in the current build.
-	def current_document?(document)
-		@current_active_document_ids.key?(document.object_id)
+	# Returns one document array with later duplicates removed by object id.
+	def unique_documents(documents)
+		Array(documents).each_with_object({}) do |document, unique_documents|
+			unique_documents[document.object_id] ||= document
+		end.values
 	end
 end
 

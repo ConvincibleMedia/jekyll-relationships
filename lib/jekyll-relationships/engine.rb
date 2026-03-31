@@ -3,6 +3,8 @@
 require 'jekyll-relationships/engine/session'
 require 'jekyll-relationships/engine/raw_path_state'
 require 'jekyll-relationships/engine/relationship_state'
+require 'jekyll-relationships/engine/normal_seed'
+require 'jekyll-relationships/engine/persisted_links'
 require 'jekyll-relationships/engine/write_back'
 require 'jekyll-relationships/trees/graph'
 
@@ -42,33 +44,32 @@ class Engine
 
 		@registry.validate_collections!
 		@registry.validate_primary_paths!(primary_paths: @configuration.primary_paths)
-		original_tree_graph = build_tree_graph(active_document_ids: all_active_document_ids)
-		tree_provenance = Pruning::TreeProvenance.new(tree_graph: original_tree_graph)
-		prune_result = prune_result_for(
-			tree_provenance: tree_provenance,
-			original_tree_graph: original_tree_graph
+		initial_active_document_ids = all_active_document_ids
+		initial_tree_seed_graph = build_tree_graph(active_document_ids: initial_active_document_ids)
+		normal_seed = NormalSeed.new(engine: self, active_document_ids: initial_active_document_ids)
+		persisted_links = PersistedLinks.new(engine: self)
+		final_result = final_result_for(
+			initial_active_document_ids: initial_active_document_ids,
+			initial_tree_seed_graph: initial_tree_seed_graph,
+			normal_seed: normal_seed,
+			persisted_links: persisted_links
 		)
-		final_session = Session.new(
-			engine: self,
-			active_document_ids: prune_result.fetch(:active_document_ids),
-			tree_graph: prune_result.fetch(:tree_graph),
-			relationship_snapshot: prune_result.fetch(:relationship_snapshot)
-		)
-		final_session.resolve_all_relationships!
+		final_session = final_result.fetch(:session)
+		final_tree_graph = final_result.fetch(:tree_graph)
 		final_normal_graph = Pruning::NormalGraph.new(session: final_session)
 
 		log_relationship_summary(
 			session: final_session,
 			normal_graph: final_normal_graph,
-			tree_graph: prune_result.fetch(:tree_graph)
+			tree_graph: final_tree_graph
 		)
 		@run_logger.pruning_summary(
-			removed_documents_by_collection: removed_documents_by_collection(prune_result.fetch(:removed_documents))
+			removed_documents_by_collection: removed_documents_by_collection(final_result.fetch(:removed_documents))
 		) if @configuration.pruning_enabled?
 
 		final_session.write_back!
-		prune_result.fetch(:tree_graph).write_back!
-		remove_inactive_documents!(active_document_ids: prune_result.fetch(:active_document_ids))
+		final_tree_graph.write_back!
+		remove_inactive_documents!(active_document_ids: final_result.fetch(:active_document_ids))
 		@run_logger.finish!
 	end
 
@@ -95,71 +96,176 @@ class Engine
 		tree_graph
 	end
 
-	# Runs the configured prune rounds and returns the final active document set.
-	def prune_result_for(tree_provenance:, original_tree_graph:)
-		current_active_document_ids = all_active_document_ids
-		removed_documents = {}
-		current_tree_graph = original_tree_graph
-		current_relationship_snapshot = nil
-		return {
-			active_document_ids: current_active_document_ids,
-			removed_documents: [],
-			tree_graph: current_tree_graph,
-			relationship_snapshot: current_relationship_snapshot
-		} unless @configuration.pruning_enabled?
+	# Returns the final active graphs, either directly or via prune iteration.
+	def final_result_for(initial_active_document_ids:, initial_tree_seed_graph:, normal_seed:, persisted_links:)
+		return resolved_result_for(
+			active_document_ids: initial_active_document_ids,
+			tree_graph: initial_tree_seed_graph.deep_dup,
+			normal_seed: normal_seed,
+			persisted_links: persisted_links,
+			removed_documents: []
+		) unless @configuration.pruning_enabled?
 
-		tree_phase = Pruning::TreePhase.new(engine: self, provenance: tree_provenance)
+		prune_result_for(
+			initial_active_document_ids: initial_active_document_ids,
+			initial_tree_seed_graph: initial_tree_seed_graph,
+			normal_seed: normal_seed,
+			persisted_links: persisted_links
+		)
+	end
+
+	# Runs the configured prune rounds and returns the final active graphs.
+	def prune_result_for(initial_active_document_ids:, initial_tree_seed_graph:, normal_seed:, persisted_links:)
+		tree_phase = Pruning::TreePhase.new(
+			engine: self,
+			provenance: Pruning::TreeProvenance.new(tree_graph: initial_tree_seed_graph)
+		)
+		current_active_document_ids = initial_active_document_ids.dup
+		current_tree_seed_graph = initial_tree_seed_graph
+		removed_documents = {}
+
 		@configuration.prune_settings.prune_rounds.times do
-			tree_phase_result = tree_phase.process(active_document_ids: current_active_document_ids)
-			register_removed_documents!(
-				removed_documents: removed_documents,
+			tree_phase_result = tree_phase.process(seed_graph: current_tree_seed_graph)
+			tree_seed_update = apply_removed_documents_to_seeds!(
+				tree_phase: tree_phase,
+				tree_seed_graph: current_tree_seed_graph,
+				normal_seed: normal_seed,
+				persisted_links: persisted_links,
+				current_active_document_ids: current_active_document_ids,
 				documents: tree_phase_result.fetch(:removed_documents)
 			)
-			current_active_document_ids = tree_phase_result.fetch(:active_document_ids)
-			current_tree_graph = tree_phase_result.fetch(:tree_graph)
+			current_tree_seed_graph = tree_seed_update.fetch(:tree_seed_graph)
+			register_removed_documents!(
+				removed_documents: removed_documents,
+				documents: tree_seed_update.fetch(:removed_documents)
+			)
 
-			session = Session.new(
-				engine: self,
+			session = build_session(
 				active_document_ids: current_active_document_ids,
-				tree_graph: current_tree_graph,
-				relationship_snapshot: current_relationship_snapshot
+				tree_graph: tree_phase_result.fetch(:graph),
+				normal_seed: normal_seed,
+				persisted_links: persisted_links
 			)
 			session.resolve_all_relationships!
-			current_relationship_snapshot = session.relationship_snapshot
 
 			normal_removed_documents = Pruning::RulePruner.new(
 				graph: Pruning::NormalGraph.new(session: session),
 				rules: @configuration.normal_prune_rules
 			).prune!
-			if normal_removed_documents.empty?
+			if normal_removed_documents.empty? && !tree_seed_changes_require_iteration?(tree_seed_update)
 				return {
 					active_document_ids: current_active_document_ids,
 					removed_documents: removed_documents.values,
-					tree_graph: current_tree_graph,
-					relationship_snapshot: current_relationship_snapshot
+					tree_graph: tree_phase_result.fetch(:graph),
+					session: session
 				}
 			end
 
-			register_removed_documents!(
-				removed_documents: removed_documents,
+			normal_seed_update = apply_removed_documents_to_seeds!(
+				tree_phase: tree_phase,
+				tree_seed_graph: current_tree_seed_graph,
+				normal_seed: normal_seed,
+				persisted_links: persisted_links,
+				current_active_document_ids: current_active_document_ids,
 				documents: normal_removed_documents
 			)
-			current_active_document_ids -= normal_removed_documents.map(&:object_id)
-			post_normal_tree_phase = tree_phase.process(active_document_ids: current_active_document_ids)
+			current_tree_seed_graph = normal_seed_update.fetch(:tree_seed_graph)
 			register_removed_documents!(
 				removed_documents: removed_documents,
-				documents: post_normal_tree_phase.fetch(:removed_documents)
+				documents: normal_seed_update.fetch(:removed_documents)
 			)
-			current_active_document_ids = post_normal_tree_phase.fetch(:active_document_ids)
-			current_tree_graph = post_normal_tree_phase.fetch(:tree_graph)
 		end
 
-		{
+		resolved_result_for(
 			active_document_ids: current_active_document_ids,
-			removed_documents: removed_documents.values,
-			tree_graph: current_tree_graph,
-			relationship_snapshot: current_relationship_snapshot
+			tree_graph: current_tree_seed_graph.deep_dup,
+			normal_seed: normal_seed,
+			persisted_links: persisted_links,
+			removed_documents: removed_documents.values
+		)
+	end
+
+	# Builds one final resolved session for the currently surviving seeds.
+	def resolved_result_for(active_document_ids:, tree_graph:, normal_seed:, persisted_links:, removed_documents:)
+		session = build_session(
+			active_document_ids: active_document_ids,
+			tree_graph: tree_graph,
+			normal_seed: normal_seed,
+			persisted_links: persisted_links
+		)
+		session.resolve_all_relationships!
+		{
+			active_document_ids: active_document_ids,
+			removed_documents: removed_documents,
+			tree_graph: tree_graph,
+			session: session
 		}
+	end
+
+	# Builds one normal-resolution session for one active graph snapshot.
+	def build_session(active_document_ids:, tree_graph:, normal_seed:, persisted_links:)
+		Session.new(
+			engine: self,
+			active_document_ids: active_document_ids,
+			tree_graph: tree_graph,
+			normal_seed: normal_seed,
+			persisted_links: persisted_links
+		)
+	end
+
+	# Applies removals to both seeds and returns the updated tree seed graph.
+	def apply_removed_documents_to_seeds!(tree_phase:, tree_seed_graph:, normal_seed:, persisted_links:, current_active_document_ids:, documents:)
+		requested_removed_documents = unique_documents(documents)
+		remove_from_normal_side!(
+			normal_seed: normal_seed,
+			persisted_links: persisted_links,
+			current_active_document_ids: current_active_document_ids,
+			documents: requested_removed_documents
+		)
+		tree_seed_result = tree_phase.apply_seed_removals(
+			seed_graph: tree_seed_graph,
+			documents: requested_removed_documents
+		)
+		extra_tree_removed_documents = unique_documents(
+			tree_seed_result.fetch(:removed_documents).reject do |document|
+				requested_removed_documents.any? { |requested_document| requested_document.object_id == document.object_id }
+			end
+		)
+		remove_from_normal_side!(
+			normal_seed: normal_seed,
+			persisted_links: persisted_links,
+			current_active_document_ids: current_active_document_ids,
+			documents: extra_tree_removed_documents
+		)
+
+		{
+			tree_seed_graph: tree_seed_result.fetch(:seed_graph),
+			removed_documents: unique_documents(requested_removed_documents + tree_seed_result.fetch(:removed_documents)),
+			seed_changed: tree_seed_result.fetch(:seed_changed)
+		}
+	end
+
+	# Removes documents from the normal seed, persisted overlay, and active set.
+	def remove_from_normal_side!(normal_seed:, persisted_links:, current_active_document_ids:, documents:)
+		documents = unique_documents(documents)
+		return if documents.empty?
+
+		normal_seed.remove_documents!(documents)
+		persisted_links.remove_documents!(documents)
+		documents.each do |document|
+			current_active_document_ids.delete(document.object_id)
+		end
+	end
+
+	# Returns true when tree-seed changes should schedule another outer round.
+	#
+	# Tree resolvers do not yet exist, so tree pruning can settle and flow
+	# directly into the same round's normal phase. When tree resolvers are added
+	# later, changing the seed here should trigger another full outer rebuild.
+	def tree_seed_changes_require_iteration?(tree_seed_update)
+		return false unless tree_seed_update.fetch(:seed_changed)
+
+		false
 	end
 
 	# Groups removed documents by collection label for summary logging.
@@ -174,6 +280,13 @@ class Engine
 		Array(documents).each do |document|
 			removed_documents[document.object_id] ||= document
 		end
+	end
+
+	# Returns one document array with later duplicates removed by object id.
+	def unique_documents(documents)
+		Array(documents).each_with_object({}) do |document, unique_documents|
+			unique_documents[document.object_id] ||= document
+		end.values
 	end
 
 	# Logs the configured relationship summary for the final active graph.
