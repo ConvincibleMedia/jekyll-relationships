@@ -5,6 +5,7 @@
 * Various major bug fixes.
 * Added option to make links persist even if pruning removes the transitive relationship that added them, with `link(ref, persist: true)`.
 * References in frontmatter at a non-output location will no longer be upgraded (modified).
+* `depth` available for trees.
 
 ## 0.1.0.alpha
 

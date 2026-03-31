@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'jekyll-relationships/trees/edge_builder'
+require 'jekyll-relationships/trees/root_distances'
 
 module Jekyll
 module Plugins
@@ -27,6 +28,7 @@ class Graph
 		@child_edge_entries = Hash.new { |hash, key| hash[key] = [] }
 		@ancestor_cache = {}
 		@descendant_cache = {}
+		@root_distance_cache = nil
 		@primary_path_by_collection = {}
 		@tree_collections = @configuration.tree_relationships.each_with_object(Set.new) do |definition, collections|
 			collections << definition.from_collection
@@ -166,6 +168,13 @@ class Graph
 		)
 	end
 
+	# Returns the shortest number of edges from the document to any root.
+	def root_distance_for(document)
+		return nil unless active_document?(document)
+
+		root_distances_for_graph[document.object_id]
+	end
+
 	# Adds one parent-child edge unless it would break tree guarantees.
 	def add_edge(parent_document:, child_document:, tree_settings:, definition:, source_description:)
 		return unless active_document?(parent_document) && active_document?(child_document)
@@ -249,7 +258,7 @@ class Graph
 			tree_settings: tree_settings,
 			source_description: source_description
 		)
-		clear_distance_cache
+		clear_traversal_cache
 		debug_tree_event(
 			document: child_document,
 			definition: definition,
@@ -284,7 +293,7 @@ class Graph
 		@parents.delete(document)
 		@child_edge_entries.delete(document)
 		@parent_edge_entries.delete(document)
-		clear_distance_cache
+		clear_traversal_cache
 		true
 	end
 
@@ -311,6 +320,7 @@ class Graph
 			child_values = children_for(document, primary_path: definition.primary_path)
 			ancestor_values = ancestors_for(document, primary_path: definition.primary_path, min: 0)
 			descendant_values = descendants_for(document, primary_path: definition.primary_path, min: 0)
+			depth_value = root_distance_for(document)
 
 			if frontmatter.output_path
 				@data_path.write(
@@ -323,6 +333,7 @@ class Graph
 						children_value: child_values,
 						ancestors_value: ancestor_values,
 						descendants_value: descendant_values,
+						depth_value: depth_value,
 						max_parents: definition.tree_settings.max_parents,
 						max_children: definition.tree_settings.max_children
 					)
@@ -355,6 +366,7 @@ class Graph
 			)
 			@data_path.write(document.data, frontmatter.ancestors_output_path, ancestor_values)
 			@data_path.write(document.data, frontmatter.descendants_output_path, descendant_values)
+			@data_path.write(document.data, frontmatter.depth_output_path, depth_value)
 			debug_tree_event(
 				document: document,
 				definition: definition,
@@ -367,7 +379,9 @@ class Graph
 					ancestors_path: frontmatter.ancestors_output_path,
 					ancestors_value: ancestor_values,
 					descendants_path: frontmatter.descendants_output_path,
-					descendants_value: descendant_values
+					descendants_value: descendant_values,
+					depth_path: frontmatter.depth_output_path,
+					depth_value: depth_value
 				}
 			)
 		end
@@ -451,6 +465,11 @@ class Graph
 		cache[document] = ordered
 	end
 
+	# Computes one shortest-root-distance map for the current graph.
+	def root_distances_for_graph
+		@root_distance_cache ||= Trees::RootDistances.for(graph: self)
+	end
+
 	# Filters one distance map to the requested range and builds references.
 	def filter_distances(distance_map, primary_path:, min:, max:)
 		distance_map.each_with_object([]) do |(document, distance), references|
@@ -481,10 +500,11 @@ class Graph
 		end
 	end
 
-	# Clears cached breadth-first-search results after a new edge is added.
-	def clear_distance_cache
+	# Clears cached graph traversals after the tree changes.
+	def clear_traversal_cache
 		@ancestor_cache.clear
 		@descendant_cache.clear
+		@root_distance_cache = nil
 	end
 
 	# Captures the metadata needed to understand one stored edge later on.

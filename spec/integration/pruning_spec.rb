@@ -641,9 +641,7 @@ RSpec.describe 'pruning' do
 		)
 
 		build_relationship_site(collections: %w[categories], relationships: relationships, files: files) do |site, _files|
-			expect(site.collections.fetch('categories').docs.map(&:basename_without_ext)).to eq(%w[child leaf])
-			expect(document_for(site, 'categories', 'child').data.fetch('relationships').fetch('parents')).to eq([])
-			expect(reference_ids(document_for(site, 'categories', 'child').data.fetch('relationships').fetch('children'))).to eq(['categories/leaf'])
+			expect(site.collections.fetch('categories').docs).to eq([])
 		end
 	end
 
@@ -738,10 +736,97 @@ RSpec.describe 'pruning' do
 		)
 
 		build_relationship_site(collections: %w[categories badges], relationships: relationships, files: files) do |site, _files|
+			child = document_for(site, 'categories', 'child')
+
 			expect(site.collections.fetch('categories').docs.map(&:basename_without_ext)).to eq(%w[child grand-a grand-b])
-			expect(reference_ids(document_for(site, 'categories', 'child').data.fetch('relationships').fetch('parents'))).to eq([
+			expect(reference_ids(child.data.fetch('relationships').fetch('parents'))).to eq([
 				'categories/grand-b',
 				'categories/grand-a'
+			])
+			expect(child.data.fetch('relationships').fetch('depth')).to eq(1)
+		end
+	end
+
+	it 'recalculates tree prune depth after orphan reattachment changes a node depth' do
+		relationships = {
+			'prune' => {
+				'tree' => {
+					'orphans' => 'grandparents'
+				}
+			},
+			'relationships' => [
+				{
+					'from' => 'categories',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'mode' => 'inverse',
+						'min' => 2,
+						'depth' => 2
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('categories', 'root'),
+			collection_document('categories', 'branch-b', {
+				'relationships' => {
+					'parent' => 'categories/root'
+				}
+			}),
+			collection_document('categories', 'branch-d', {
+				'relationships' => {
+					'parent' => 'categories/root'
+				}
+			}),
+			collection_document('categories', 'branch-g', {
+				'relationships' => {
+					'parent' => 'categories/root'
+				}
+			}),
+			collection_document('categories', 'leaf-c', {
+				'relationships' => {
+					'parent' => 'categories/branch-b'
+				}
+			}),
+			collection_document('categories', 'leaf-d-1', {
+				'relationships' => {
+					'parent' => 'categories/branch-d'
+				}
+			}),
+			collection_document('categories', 'leaf-d-2', {
+				'relationships' => {
+					'parent' => 'categories/branch-d'
+				}
+			}),
+			collection_document('categories', 'leaf-g-1', {
+				'relationships' => {
+					'parent' => 'categories/branch-g'
+				}
+			}),
+			collection_document('categories', 'leaf-g-2', {
+				'relationships' => {
+					'parent' => 'categories/branch-g'
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[categories], relationships: relationships, files: files) do |site, _files|
+			root = document_for(site, 'categories', 'root')
+
+			expect(site.collections.fetch('categories').docs.map(&:basename_without_ext)).to eq(%w[
+				branch-d
+				branch-g
+				leaf-d-1
+				leaf-d-2
+				leaf-g-1
+				leaf-g-2
+				root
+			])
+			expect(reference_ids(root.data.fetch('relationships').fetch('children'))).to eq([
+				'categories/branch-d',
+				'categories/branch-g'
 			])
 		end
 	end

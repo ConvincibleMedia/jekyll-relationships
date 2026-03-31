@@ -35,6 +35,7 @@ relationships:
       children: children # which keys specify multiple children
       ancestors: ancestors # key on which to set ancestors
       descendants: descendants # key on which to set descendants
+      depth: depth # key on which to set depth
     max:
       parents: -1 # max parents per item (-1 = unlimited)
       children: -1 # max children per item
@@ -245,7 +246,7 @@ Note that the `parent`/`child` relationship is symmetric. If A is a parent of B,
 
 Tree mode can be configured under `tree`:
 
-* `frontmatter`: set the keys that will be used for single/multiple parents/children and ancestors/descendants.
+* `frontmatter`: set the keys that will be used for single/multiple parents/children, ancestors/descendants, and depth.
 * `max`: set max allowed parents/children (default `-1` i.e. unlimited).
 * `url`: interpret URLs as ancestry information (default false).
 
@@ -265,6 +266,7 @@ Tree relationships are processed as follows:
 * Having built the graph, the tree links are filled in on each document:
   * `parents` and `children` are set as arrays of the immediate ancestors/descendants as reference hashes.
   * `ancestors` and `descendants` are set as arrays where each element is a reference hash. In this situation the hash gains the property `distance`, which is 0 for self, 1 for immediate parent/child, 2 for grandparent/grandchild, etc. The arrays are in ascending distance order. If an item can be reached by multiple paths, the shortest path gives the distance.
+  * `depth` is set as an integer giving the shortest number of edges from the document to any root. Root documents therefore have depth `0`, their children have depth `1`, and so on.
 
 ### Max
 

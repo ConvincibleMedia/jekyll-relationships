@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'jekyll-relationships/trees/root_distances'
+
 module Jekyll
 module Plugins
 
@@ -21,6 +23,7 @@ class TreePhase
 			@documents_by_collection = Hash.new { |hash, key| hash[key] = {} }
 			@parents = Hash.new { |hash, key| hash[key] = {} }
 			@children = Hash.new { |hash, key| hash[key] = {} }
+			@root_distance_cache = nil
 			register_documents!
 			register_edges!
 		end
@@ -28,6 +31,32 @@ class TreePhase
 		# Returns every currently active document for one collection.
 		def documents_for(collection)
 			@documents_by_collection[collection].values
+		end
+
+		# Returns every currently active tree document.
+		def tree_documents
+			@documents_by_collection.values.flat_map(&:values)
+		end
+
+		# Returns the direct parent documents for one active document.
+		def parent_documents_for(document)
+			return [] unless active_document?(document)
+
+			@parents[document].keys
+		end
+
+		# Returns the direct child documents for one active document.
+		def child_documents_for(document)
+			return [] unless active_document?(document)
+
+			@children[document].keys
+		end
+
+		# Returns the shortest current distance from one document to any root.
+		def root_distance_for(document)
+			return nil unless active_document?(document)
+
+			root_distances_for_graph[document.object_id]
 		end
 
 		# Returns the relevant neighbour documents for one configured tree member.
@@ -49,6 +78,7 @@ class TreePhase
 			end
 			@children.delete(document)
 			@parents.delete(document)
+			clear_root_distance_cache
 			true
 		end
 
@@ -116,6 +146,21 @@ class TreePhase
 				combined[document.object_id] ||= document
 			end.values
 		end
+
+		# Returns true when one document is still active in the mutable view.
+		def active_document?(document)
+			@documents_by_collection[document.collection.label].key?(document.object_id)
+		end
+
+		# Calculates the current root distances and caches them until the view changes.
+		def root_distances_for_graph
+			@root_distance_cache ||= Trees::RootDistances.for(graph: self)
+		end
+
+		# Clears the cached root distances after a structural tree change.
+		def clear_root_distance_cache
+			@root_distance_cache = nil
+		end
 	end
 
 	# Builds one tree phase helper for one engine and one immutable provenance set.
@@ -135,13 +180,8 @@ class TreePhase
 			removed_documents: unique_documents(removed_documents)
 		} if @configuration.tree_prune_rules.empty?
 
-		eligible_document_ids_by_rule = eligible_document_ids_by_rule(graph: current_tree_graph)
-
 		loop do
-			pruned_documents = prune_tree_rules(
-				graph: current_tree_graph,
-				eligible_document_ids_by_rule: eligible_document_ids_by_rule
-			)
+			pruned_documents = prune_tree_rules(graph: current_tree_graph)
 			if pruned_documents.empty?
 				return {
 					graph: current_tree_graph,
@@ -197,54 +237,19 @@ class TreePhase
 		end
 	end
 
-	# Builds one stable lookup of which documents each tree rule may prune.
-	def eligible_document_ids_by_rule(graph:)
-		root_distances = root_distances_for(graph)
-		@configuration.tree_prune_rules.each_with_object({}) do |rule, lookup|
-			lookup[rule.object_id] = graph.documents_for(rule.subject_collection).each_with_object({}) do |document, eligible_documents|
-				next unless depth_selected?(depth: rule.depth, root_distance: root_distances[document.object_id])
-
-				eligible_documents[document.object_id] = true
-			end
-		end
-	end
-
-	# Runs the configured tree prune rules against the current graph while only
-	# allowing the documents selected by the initial depth snapshot to be pruned.
-	def prune_tree_rules(graph:, eligible_document_ids_by_rule:)
+	# Runs the configured tree prune rules against the current graph, re-reading
+	# depth from the mutable graph view each time candidates are evaluated.
+	def prune_tree_rules(graph:)
 		RulePruner.new(
 			graph: TreeGraphView.new(tree_graph: graph),
 			rules: @configuration.tree_prune_rules,
 			subject_documents_resolver: lambda do |rule, mutable_graph|
-				eligible_document_ids = eligible_document_ids_by_rule.fetch(rule.object_id)
 				mutable_graph.documents_for(rule.subject_collection).select do |document|
-					eligible_document_ids.key?(document.object_id)
+					depth = rule.depth
+					depth.nil? || depth_selected?(depth: depth, root_distance: mutable_graph.root_distance_for(document))
 				end
 			end
 		).prune!
-	end
-
-	# Calculates the shortest distance from every node to any root in the current tree.
-	def root_distances_for(graph)
-		root_distances = {}
-		queue = graph.tree_documents.select do |document|
-			graph.parent_documents_for(document).empty?
-		end.sort_by(&:relative_path).map do |root_document|
-			[root_document, 0]
-		end
-
-		until queue.empty?
-			document, distance = queue.shift
-			existing_distance = root_distances[document.object_id]
-			next if !existing_distance.nil? && existing_distance <= distance
-
-			root_distances[document.object_id] = distance
-			graph.child_documents_for(document).each do |child_document|
-				queue << [child_document, distance + 1]
-			end
-		end
-
-		root_distances
 	end
 
 	# Returns true when one root distance is eligible under one configured depth.

@@ -26,7 +26,8 @@ class Configuration
 				'parents' => 'parents',
 				'children' => 'children',
 				'ancestors' => 'ancestors',
-				'descendants' => 'descendants'
+				'descendants' => 'descendants',
+				'depth' => 'depth'
 			}.freeze,
 			'max' => {
 				'parents' => -1,

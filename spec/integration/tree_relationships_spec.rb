@@ -30,9 +30,12 @@ RSpec.describe 'tree relationships' do
 		)
 
 		build_relationship_site(collections: %w[deliverables], relationships: relationships, files: files) do |site, _files|
+			root = document_for(site, 'deliverables', 'root')
 			leaf = document_for(site, 'deliverables', 'leaf')
 			ancestors = leaf.data.fetch('relationships').fetch('ancestors')
 
+			expect(root.data.fetch('relationships').fetch('depth')).to eq(0)
+			expect(leaf.data.fetch('relationships').fetch('depth')).to eq(2)
 			expect(reference_ids(leaf.data.fetch('relationships').fetch('parents'))).to eq([
 				'deliverables/branch-a',
 				'deliverables/branch-b'
@@ -343,7 +346,8 @@ RSpec.describe 'tree relationships' do
 					'child' => 'down',
 					'children' => 'all_down',
 					'ancestors' => 'lineage',
-					'descendants' => 'branches'
+					'descendants' => 'branches',
+					'depth' => 'tier'
 				}
 			},
 			'relationships' => [
@@ -368,6 +372,8 @@ RSpec.describe 'tree relationships' do
 			expect(reference_ids(leaf.data.fetch('data').fetch('all_up'))).to eq(['topics/root'])
 			expect(reference_ids(leaf.data.fetch('data').fetch('lineage'))).to eq(['topics/leaf', 'topics/root'])
 			expect(reference_ids(root.data.fetch('data').fetch('branches'))).to eq(['topics/root', 'topics/leaf'])
+			expect(root.data.fetch('data').fetch('tier')).to eq(0)
+			expect(leaf.data.fetch('data').fetch('tier')).to eq(1)
 		end
 	end
 
@@ -384,7 +390,8 @@ RSpec.describe 'tree relationships' do
 					'parents' => 'global.parents',
 					'children' => 'global.children',
 					'ancestors' => 'global.ancestors',
-					'descendants' => 'global.descendants'
+					'descendants' => 'global.descendants',
+					'depth' => 'global.depth'
 				}
 			},
 			'relationships' => [
@@ -442,6 +449,8 @@ RSpec.describe 'tree relationships' do
 
 			expect(reference_ids(leaf_tree.fetch('family').fetch('up'))).to eq(['topics/root', 'topics/other-root'])
 			expect(reference_ids(leaf_tree.fetch('global').fetch('ancestors'))).to eq(['topics/leaf', 'topics/root', 'topics/other-root'])
+			expect(leaf_tree.fetch('global').fetch('depth')).to eq(1)
+			expect(root_tree.fetch('global').fetch('depth')).to eq(0)
 			expect(reference_ids(root_tree.fetch('family').fetch('down'))).to eq(['topics/root', 'topics/leaf'])
 		end
 	end

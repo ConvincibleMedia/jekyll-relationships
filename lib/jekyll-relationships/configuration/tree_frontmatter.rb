@@ -14,7 +14,7 @@ class Configuration
 	# The resolved helper exposes explicit input and output paths so the tree
 	# graph never has to reimplement config merging rules.
 	class TreeFrontmatter
-		PATH_NAMES = %w[parent child parents children ancestors descendants].freeze
+		PATH_NAMES = %w[parent child parents children ancestors descendants depth].freeze
 
 		# Builds one tree-frontmatter helper from the resolved values.
 		def initialize(base:, raw_paths:, raw_output_path:, string_array:)
@@ -118,6 +118,11 @@ class Configuration
 			first_path_for('descendants')
 		end
 
+		# Returns the absolute prevailing depth output path.
+		def depth_output_path
+			first_path_for('depth')
+		end
+
 		# Returns the absolute output container path, if one is configured.
 		def output_path
 			return nil if blank_path?(@raw_output_path)
@@ -131,7 +136,7 @@ class Configuration
 		# The configured relative tree paths become nested keys within the output
 		# hash, while the configured output container path becomes the single
 		# frontmatter location on which that hash is written.
-		def output_payload(parent_value:, parents_value:, child_value:, children_value:, ancestors_value:, descendants_value:, max_parents:, max_children:)
+		def output_payload(parent_value:, parents_value:, child_value:, children_value:, ancestors_value:, descendants_value:, depth_value:, max_parents:, max_children:)
 			payload = {}
 			data_path = Jekyll::Plugins::Relationships::Support::DataPath.new
 
@@ -149,6 +154,7 @@ class Configuration
 
 			data_path.write(payload, first_relative_path_for('ancestors'), ancestors_value)
 			data_path.write(payload, first_relative_path_for('descendants'), descendants_value)
+			data_path.write(payload, first_relative_path_for('depth'), depth_value)
 			payload
 		end
 
