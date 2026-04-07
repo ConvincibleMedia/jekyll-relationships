@@ -38,6 +38,11 @@ class NormalRelationship
 		@debug.enabled?(area)
 	end
 
+	# Returns true when this relationship is the synthetic inverse of a bidirectional pair.
+	def bidirectional_mirror?
+		@bidirectional && !@reads_frontmatter
+	end
+
 	# Returns true when one event's related IDs satisfy this pair's debug filter.
 	def debug_ids_match?(ids)
 		@debug.matches_ids?(ids)
