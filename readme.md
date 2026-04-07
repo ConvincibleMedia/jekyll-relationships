@@ -463,8 +463,8 @@ relationships:
         min: 2 # prune a product if it has fewer than 2 children
         depth: 1 # only prune root notes
   prune:
-    combine: true # default
-    iterations: 10 # default
+    combine: true # default; count expanded prune targets together per collection
+    iterations: 10 # default; extra prune rounds after the first pass
     tree:
       orphans: grandparents # default
 ```
@@ -477,7 +477,28 @@ relationships:
   * `1` selects roots, `2` would be roots and their chlidren, etc.
   * `-1` and negative integers are the negation of their positive counterparts. So `-2` means all but the first two levels of the tree are eligible for pruning.
 
-Pruning is iterative. E.g. if pruning causes more nodes to trigger pruning rules, they will also be pruned. Each round fully resolves the tree first, then fully resolves normal relationships on top of that tree.
+`prune` can also be `false` to disable pruning at that level, or an integer as a shortcut for `prune: min: int`.
+
+### Combine
+
+Consider:
+
+```yaml
+- from: products
+  to: categories, services
+  prune:
+    min: 2
+```
+
+With `prune.combine: true`, the total count of links from `products` to `categories` *or* `services` would be considered. Only if this total count is below `min` would the product be pruned.
+
+With `prune.combine: false` each relationship is checked separately. If either `products` → `categories` or `products` → `services` has fewer links than `min`, the product will be pruned.
+
+### Iteration
+
+Pruning is iterative. E.g. if pruning causes more nodes to trigger pruning rules, they will also be pruned. Each round fully resolves the tree first, then fully resolves normal relationships on top of that tree. The maximum iterations can be controlled with `prune.iterations`.
+
+### Trees
 
 If pruning removes a node from a tree, any children that lose all parents become orphans. `relationships.prune.tree.orphans` controls what happens:
 
@@ -485,8 +506,6 @@ If pruning removes a node from a tree, any children that lose all parents become
 * `grandparents required`: as above, but also remove the orphan if there is no grandparent to connect to.
 * `prune`: prune all orphans recursively.
 * `orphan`: leave them parentless.
-
-`prune` can also be `false` to disable pruning at that level, or an integer as a shortcut for `prune: min: int`.
 
 
 ## Keywords
