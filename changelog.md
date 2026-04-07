@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1.alpha.2 in progress
+
+* Ensure forward relationships resolve before inverse ones which should be merely mirrors
+
 ## 0.1.1.alpha
 
 * Various major bug fixes.
