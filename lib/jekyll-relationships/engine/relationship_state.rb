@@ -75,6 +75,9 @@ class Engine
 			target_document = @engine.resolve_reference_document(
 				reference,
 				primary_path: @definition.primary_path,
+				scope_fields: @definition.scope_fields,
+				referring_document: @document,
+				relationship: relationship_description,
 				collection_hint: @definition.to_collection
 			)
 			unless @engine.active_document?(target_document)
@@ -99,6 +102,7 @@ class Engine
 			result = @links.add_detailed_result(
 				document: target_document,
 				key: @engine.registry.key_for(target_document, primary_path: @definition.primary_path),
+				scope: @engine.registry.scope_for(target_document, scope_fields: @definition.scope_fields, relationship: relationship_description),
 				metadata: sanitised_metadata(metadata),
 				count: count
 			)
@@ -145,6 +149,9 @@ class Engine
 			target_document = @engine.resolve_reference_document(
 				reference,
 				primary_path: @definition.primary_path,
+				scope_fields: @definition.scope_fields,
+				referring_document: @document,
+				relationship: relationship_description,
 				collection_hint: @definition.to_collection
 			)
 			@engine.clear_persisted_link(source_state: self, target_document: target_document) if clear_persisted
@@ -229,6 +236,11 @@ class Engine
 		# Builds a readable state label for cycle errors.
 		def description
 			"`#{@document.relative_path}` (#{@definition.from_collection} -> #{@definition.to_collection})"
+		end
+
+		# Returns the concrete relationship label used in validation diagnostics.
+		def relationship_description
+			"#{@definition.from_collection} -> #{@definition.to_collection}"
 		end
 
 		# Emits one debug event for this state when the definition enables it.

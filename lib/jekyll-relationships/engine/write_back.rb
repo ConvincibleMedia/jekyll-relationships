@@ -90,6 +90,7 @@ class Engine
 					accumulator.add(
 						document: entry.fetch(:document),
 						key: entry.fetch(:key),
+						scope: entry.fetch(:scope),
 						metadata: entry.fetch(:metadata),
 						count: entry.fetch(:count)
 					)

@@ -79,7 +79,7 @@ class Engine
 		# Reads and stores one concrete direct relationship definition from frontmatter.
 		def seed_definition_from_frontmatter(accumulators:, document:, definition:)
 			definition.foreign_paths.each do |path|
-				raw_state = raw_path_state(document, path)
+				raw_state = raw_path_state(document, path, definition)
 				debug_relationship_event(
 					document: document,
 					definition: definition,
@@ -94,7 +94,9 @@ class Engine
 
 				resolved_entries = raw_state.resolved_entries_for(
 					primary_path: definition.primary_path,
+					scope_fields: definition.scope_fields,
 					registry: @registry,
+					relationship: "#{definition.from_collection} -> #{definition.to_collection}",
 					active_document_checker: proc { |resolved_document| active_document?(resolved_document) }
 				)
 				debug_relationship_event(
@@ -144,6 +146,7 @@ class Engine
 			).add(
 				document: entry.fetch(:document),
 				key: entry.fetch(:key),
+				scope: entry.fetch(:scope),
 				metadata: entry.fetch(:metadata),
 				count: entry.fetch(:count)
 			)
@@ -157,6 +160,7 @@ class Engine
 			).add(
 				document: document,
 				key: @registry.key_for(document, primary_path: definition.primary_path),
+				scope: @registry.scope_for(document, scope_fields: definition.scope_fields, relationship: "#{definition.from_collection} -> #{definition.to_collection}"),
 				metadata: entry.fetch(:metadata),
 				count: entry.fetch(:count)
 			)
@@ -183,13 +187,14 @@ class Engine
 		end
 
 		# Returns the cached raw-path parser for one document/path pair.
-		def raw_path_state(document, path)
-			@raw_path_states[[document.object_id, path]] ||= RawPathState.new(
+		def raw_path_state(document, path, definition)
+			@raw_path_states[[document.object_id, path, definition.object_id]] ||= RawPathState.new(
 				document: document,
 				path: path,
 				data_path: @data_path,
 				string_array: @string_array,
-				reference_template: @configuration.reference_template
+				reference_template: @configuration.reference_template,
+				reference_context: "Relationship `#{definition.from_collection} -> #{definition.to_collection}` reference on document `#{document.relative_path}`"
 			)
 		end
 

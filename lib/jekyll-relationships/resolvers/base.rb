@@ -238,6 +238,9 @@ class Base
 		@engine.resolve_reference_document(
 			reference,
 			primary_path: @state.definition.primary_path,
+			scope_fields: @state.definition.scope_fields,
+			referring_document: @document,
+			relationship: "#{@state.definition.from_collection} -> #{@state.definition.to_collection}",
 			collection_hint: from_collection
 		)
 	end

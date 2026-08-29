@@ -97,16 +97,41 @@ class Engine
 		end
 
 		# Resolves one helper or resolver reference to a document, even if inactive.
-		def resolve_reference_document(reference, primary_path:, collection_hint: nil)
-			return reference if reference.is_a?(Jekyll::Document)
+		def resolve_reference_document(reference, primary_path:, scope_fields: [], referring_document: nil, relationship: nil, collection_hint: nil)
+			if reference.is_a?(Jekyll::Document)
+				@registry.scope_for(reference, scope_fields: scope_fields, relationship: relationship)
+				return reference
+			end
 
-			parsed_reference = @configuration.reference_template.parse(reference)
-			return parsed_reference.page if parsed_reference.document?
+			parsed_reference = @configuration.reference_template.parse(
+				reference,
+				context: reference_context(relationship: relationship, document: referring_document)
+			)
+			effective_scope = @registry.effective_scope_for(
+				reference_scope: parsed_reference.scope,
+				referring_document: referring_document,
+				scope_fields: scope_fields,
+				relationship: relationship
+			)
+			if parsed_reference.document?
+				@registry.validate_scope_match!(
+					document: parsed_reference.page,
+					scope: effective_scope,
+					scope_fields: scope_fields,
+					relationship: relationship,
+					referring_document: referring_document
+				)
+				return parsed_reference.page
+			end
 
 			@registry.lookup(
 				key: parsed_reference.key,
 				primary_path: primary_path,
-				collection: collection_hint || (parsed_reference.collection.nil? ? nil : parsed_reference.collection.to_s)
+				collection: collection_hint || (parsed_reference.collection.nil? ? nil : parsed_reference.collection.to_s),
+				scope_fields: scope_fields,
+				scope: effective_scope,
+				relationship: relationship,
+				referring_document: referring_document
 			)
 		end
 
@@ -215,6 +240,14 @@ class Engine
 		end
 
 		private
+
+		# Builds consistent relationship and source-document details for reference parsing errors.
+		def reference_context(relationship:, document:)
+			parts = []
+			parts << "Relationship `#{relationship}`" unless relationship.nil? || relationship.to_s.empty?
+			parts << "reference on document `#{document.relative_path}`" if document
+			parts.join(' ')
+		end
 
 		# Seeds every normal relationship state before any resolver mutates the graph.
 		#

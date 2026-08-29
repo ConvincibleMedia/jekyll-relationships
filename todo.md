@@ -11,4 +11,5 @@
 	via: self, deliverables
 	```
 * Multiple output frontmatter locations
-
+* Compound primary keys.
+* Scope matching modes, e.g. relaxed scopes where a missing scope is a match.
