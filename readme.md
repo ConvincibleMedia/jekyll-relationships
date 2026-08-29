@@ -2,6 +2,7 @@
 
 Plugin for Jekyll that allows collection documents to specify their relationships with each other, via many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each document's frontmatter.
 
+
 ## Configuration
 
 How documents link to each other is specified by configuration.
@@ -17,6 +18,7 @@ relationships:
   frontmatter: # see Frontmatter below
     base: relationships # prepend to other keys
     primary: nil # use Document path as primary key
+    scope: nil # optional paths that narrow where the primary key is unique
     foreign: <collection> # because of base, treated as `relationships.<foreign>`
     output: nil # see Output below
 
@@ -24,6 +26,7 @@ relationships:
   references: # see References below
     id: <key>
     collection: <collection>
+    scope: <scope>
     page: <page>
 
   # Settings for tree relationships
@@ -120,17 +123,19 @@ The defined relationships will be processed and resolved. This will:
 Relationships between documents are specified by values in each document's frontmatter. Somewhere in the frontmatter of documents you must have:
 
 * A "Primary Key": a value that identifies this document
+* A "Scope" (optional): one or more frontmatter keys that narrow where the primary key is unique (see more below)
 * A "Foreign Key": a value that identifies another document's primary key
 
-You specify where in the frontmatter these primary/foreign keys exist, using:
+You specify where in the frontmatter these values exist, using:
 
 ```yaml
 frontmatter:
   primary: id # the frontmatter key `id` holds the primary key value
+  scope: locale, meta.region # the complete scope is read from both paths
   foreign: <collection> # <collection> is replaced by the label of a `to` collection. The frontmatter key that matches this label holds a reference to a document in that collection.
 ```
 
-* Both keys can be specified with dot-notation to access deeply nested keys, e.g. `meta.details.relationships.id`.
+* `primary`, every `scope` entry, and `foreign` can use dot-notation to access deeply nested keys, e.g. `meta.details.relationships.id`.
 * `<collection>` is valid only within `foreign`. Example:
   
   ```yaml
@@ -143,6 +148,15 @@ frontmatter:
 
   In `products` documents, this would find links to `categories` at `links.categories_links` and links to `tags` at `links.tags_links`.
 * `foreign` can be an array of frontmatter locations where references will be read. These will all be accumulated. Unless `output` is set, the first location will become the output location and others will be untouched.
+
+### Scope
+
+`frontmatter.scope` is optional. When configured, a document is identified by its primary key, optionally within a collection, within a scope. This allows the same primary key to occur in different contexts, e.g. where `locale` is `en` or `fr`.
+
+Crucially, **scope values are drawn from the referring document**. For instance, with `scope: locale`, document A can refer to document B by `id` only. Document A's own `locale` is `en`. Document B is identified as the document with the given `id` and `locale: en`.
+
+Scope can be set globally and then unset with `scope: null`, or redefined, on particular relationships if desired.
+
 
 ### Output
 
@@ -159,12 +173,13 @@ relationships:
 
 ### Base
 
-Any definition of `frontmatter` may specify a `base` which will be prepended to both the `primary` and `foreign` keys within that `frontmatter` definition.
+Any definition of `frontmatter` may specify a `base` which will be prepended to the `primary`, `scope`, `foreign`, and `output` paths within that `frontmatter` definition. Scope keys in reference hashes remain the literal configured names without the base prefix.
 
 ```yaml
 frontmatter:
   base: links
   primary: id # treated as `links.id`
+  scope: locale # read from `links.locale`, represented as `locale` in reference hashes
   foreign: <collection> # treated as `links.<collection>`
 ```
 
@@ -208,6 +223,7 @@ The `references` config lets you modify the shape of reference hashes. Its keys 
 
 * `<key>` exactly (required): this key gives the foreign key, and must be present.
 * `<collection>`: this key gives the collection in which the foreign document exists.
+* `<scope>`: this key gives a hash of scope overrides and receives the complete effective scope after resolution.
 * `<page>`: this key will be set to the actual `Jekyll::Document` instance for the foreign document.
 
 Example:
@@ -221,14 +237,26 @@ relationships:
     page: <page>
 ```
 
-When relationships are processed, references are read loosely: strings are foreign keys, hashes look at the foreign key/collection keys only, ignoring others. Following resolution, all references are upgraded to the defined hash form (merging over any other keys on an existing hash).
+When relationships are processed, string references inherit their complete scope from the referring document. Hash references also inherit scope by default, but may override selected fields through the reserved scope property:
+
+```yaml
+parent:
+  id: B
+  collection: pages
+  scope:
+    locale: fr
+```
+
+The reserved scope property must be a hash. Omitted fields inherit from the referring document. Every override key must exactly name a configured scope field, exactly as it was defined in `frontmatter`.
+
+Following resolution, references are upgraded to the configured hash form. Other properties on an input hash remain free-form metadata.
 
 
 ## Primary Keys
 
-**Primary keys must be unique** within a collection. However, if you set things up so that primary keys are unique across *all* collections, then you no longer need to know the collection of a document when linking to it: just the foreign key is needed.
+**Primary keys must be unique** within a collection and scope.
 
-If the collection isn't given by the reference, all collections will be searched to find the foreign key. If non-unique keys are found this will raise an error.
+If the collection isn't given by the reference, the existing eligible collections are searched for the foreign key and then constrained by the effective scope.
 
 When the `primary` config is `nil`, (which is the default), the document "path" is used as the primary key. This guarantees uniqueness across the whole site. Document path is `Document#relative_path` with leading `_` and trailing `Document.extname` removed, giving strings like `products/shoes` for `shoes.md` in the `products` collection.
 
@@ -320,7 +348,7 @@ This document's links are modified with the `link` and `unlink` methods:
 
 * `link(reference)`
   * `reference` gives the document to link to, from this document. It must be in the `@to` collection.
-  * `reference:` (optional named parameter): gives a hash that the created reference hash will merge over, providing arbitrary addititional properties to the hash.
+  * `reference:` (optional named parameter): gives a hash that the created reference hash will merge over, providing arbitrary additional properties to the hash. Engine-reserved key, collection, scope, page, and count properties cannot be overwritten through this metadata.
   * `persist:` (optional named parameter, `true` or `false`): whether to remember this resolver-added link so it can be restored in later prune rounds even if the original route by which it was discovered disappears (see [Pruning](#pruning)).
 * `unlink(reference)`
   * Remove the link to the `reference`d document.
@@ -352,6 +380,8 @@ The `reference` parameter in all the above:
 * Can be a reference (i.e. a key string or reference hash). If optional `from` is passed, or the reference hash has collection info, the key lookup is constrained to that collection.
 * Can be a `Jekyll::Document` object. Its primary key and collection are read from the object.
 * Can be omitted in the helpers, in which case the method operates on *this* document.
+
+For a scoped relationship, resolver strings and hashes use the same scope inheritance and partial-override rules as frontmatter references. Passing a `Jekyll::Document` uses that target document's complete scope.
 
 ### Example
 
@@ -550,6 +580,7 @@ relationships:
       frontmatter:
         foreign: data.client
 ```
+
 
 ## Notes
 
