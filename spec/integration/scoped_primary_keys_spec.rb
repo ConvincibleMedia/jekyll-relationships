@@ -185,6 +185,119 @@ RSpec.describe 'scoped primary-key resolution' do
 		end
 	end
 
+	it 'resolves global scope, relationship overrides and relationship opt-outs independently at runtime' do
+		relationships = {
+			'frontmatter' => {
+				'base' => '',
+				'primary' => 'id',
+				'scope' => 'locale',
+				'foreign' => 'links.<collection>'
+			},
+			'relationships' => [
+				{ 'from' => 'sources', 'to' => 'pages' },
+				{
+					'from' => 'sources',
+					'to' => 'regional_pages',
+					'frontmatter' => { 'scope' => 'region' }
+				},
+				{
+					'from' => 'sources',
+					'to' => 'services',
+					'frontmatter' => { 'scope' => nil }
+				}
+			]
+		}
+		files = relationship_site_files(
+			collection_document('sources', 'source', {
+				'id' => 'A',
+				'locale' => 'en',
+				'region' => 'uk',
+				'links' => {
+					'pages' => 'B',
+					'regional_pages' => 'B',
+					'services' => 'S'
+				}
+			}),
+			collection_document('pages', 'page-en', { 'id' => 'B', 'locale' => 'en' }),
+			collection_document('pages', 'page-fr', { 'id' => 'B', 'locale' => 'fr' }),
+			collection_document('regional_pages', 'page-uk', { 'id' => 'B', 'region' => 'uk' }),
+			collection_document('regional_pages', 'page-us', { 'id' => 'B', 'region' => 'us' }),
+			collection_document('services', 'service', { 'id' => 'S' })
+		)
+
+		build_relationship_site(collections: %w[sources pages regional_pages services], relationships: relationships, files: files) do |site, _files|
+			links = document_for(site, 'sources', 'source').data.fetch('links')
+			page_reference = links.fetch('pages').first
+			regional_page_reference = links.fetch('regional_pages').first
+			service_reference = links.fetch('services').first
+
+			expect(page_reference.fetch('scope')).to eq('locale' => 'en')
+			expect(page_reference.fetch('page').basename_without_ext).to eq('page-en')
+			expect(regional_page_reference.fetch('scope')).to eq('region' => 'uk')
+			expect(regional_page_reference.fetch('page').basename_without_ext).to eq('page-uk')
+			expect(service_reference.fetch('id')).to eq('S')
+			expect(service_reference).not_to have_key('scope')
+		end
+	end
+
+	it 'resolves relationship-only and target-only scope without affecting unscoped relationships' do
+		relationships = {
+			'frontmatter' => {
+				'base' => '',
+				'primary' => 'id',
+				'foreign' => 'links.<collection>'
+			},
+			'relationships' => [
+				{
+					'from' => 'sources',
+					'to' => [
+						{
+							'collection' => 'pages',
+							'frontmatter' => { 'scope' => 'locale' }
+						},
+						'services'
+					]
+				},
+				{
+					'from' => 'sources',
+					'to' => 'regional_pages',
+					'frontmatter' => { 'scope' => 'region' }
+				}
+			]
+		}
+		files = relationship_site_files(
+			collection_document('sources', 'source', {
+				'id' => 'A',
+				'locale' => 'en',
+				'region' => 'uk',
+				'links' => {
+					'pages' => 'B',
+					'regional_pages' => 'R',
+					'services' => 'S'
+				}
+			}),
+			collection_document('pages', 'page-en', { 'id' => 'B', 'locale' => 'en' }),
+			collection_document('pages', 'page-fr', { 'id' => 'B', 'locale' => 'fr' }),
+			collection_document('regional_pages', 'page-uk', { 'id' => 'R', 'region' => 'uk' }),
+			collection_document('regional_pages', 'page-us', { 'id' => 'R', 'region' => 'us' }),
+			collection_document('services', 'service', { 'id' => 'S' })
+		)
+
+		build_relationship_site(collections: %w[sources pages regional_pages services], relationships: relationships, files: files) do |site, _files|
+			links = document_for(site, 'sources', 'source').data.fetch('links')
+			page_reference = links.fetch('pages').first
+			regional_page_reference = links.fetch('regional_pages').first
+			service_reference = links.fetch('services').first
+
+			expect(page_reference.fetch('scope')).to eq('locale' => 'en')
+			expect(page_reference.fetch('page').basename_without_ext).to eq('page-en')
+			expect(regional_page_reference.fetch('scope')).to eq('region' => 'uk')
+			expect(regional_page_reference.fetch('page').basename_without_ext).to eq('page-uk')
+			expect(service_reference.fetch('id')).to eq('S')
+			expect(service_reference).not_to have_key('scope')
+		end
+	end
+
 	it 'preserves an ordinary scope metadata property when no relationship configures scope' do
 		relationships = {
 			'relationships' => [
@@ -396,7 +509,7 @@ RSpec.describe 'scoped primary-key resolution' do
 		define_resolver('ScopedServiceAdder', from: 'products', to: 'services') do
 			def resolve
 				link('B', reference: {
-					'scope' => { 'locale' => 'wrong' },
+					'scope' => { 'locale' => 'wrong', 'region' => 'wrong' },
 					'note' => 'inherited'
 				})
 				link(
@@ -405,7 +518,7 @@ RSpec.describe 'scoped primary-key resolution' do
 						'scope' => { 'locale' => 'fr' }
 					},
 					reference: {
-						'scope' => { 'locale' => 'wrong' },
+						'scope' => { 'locale' => 'wrong', 'region' => 'wrong' },
 						'note' => 'overridden'
 					}
 				)
@@ -416,7 +529,7 @@ RSpec.describe 'scoped primary-key resolution' do
 			'frontmatter' => {
 				'base' => '',
 				'primary' => 'id',
-				'scope' => 'locale',
+				'scope' => 'locale, region',
 				'foreign' => 'links.<collection>'
 			},
 			'relationships' => [
@@ -424,17 +537,17 @@ RSpec.describe 'scoped primary-key resolution' do
 			]
 		}
 		files = relationship_site_files(
-			collection_document('products', 'product', { 'id' => 'A', 'locale' => 'en' }),
-			collection_document('services', 'service-en', { 'id' => 'B', 'locale' => 'en' }),
-			collection_document('services', 'service-fr', { 'id' => 'B', 'locale' => 'fr' })
+			collection_document('products', 'product', { 'id' => 'A', 'locale' => 'en', 'region' => 'uk' }),
+			collection_document('services', 'service-en', { 'id' => 'B', 'locale' => 'en', 'region' => 'uk' }),
+			collection_document('services', 'service-fr', { 'id' => 'B', 'locale' => 'fr', 'region' => 'uk' })
 		)
 
 		build_relationship_site(collections: %w[products services], relationships: relationships, files: files) do |site, _files|
 			references = document_for(site, 'products', 'product').data.fetch('links').fetch('services')
 
 			expect(reference_values(references, 'scope')).to eq([
-				{ 'locale' => 'en' },
-				{ 'locale' => 'fr' }
+				{ 'locale' => 'en', 'region' => 'uk' },
+				{ 'locale' => 'fr', 'region' => 'uk' }
 			])
 			expect(reference_values(references, 'note')).to eq(%w[inherited overridden])
 			expect(references.map { |reference| reference.fetch('page').basename_without_ext }).to eq(%w[service-en service-fr])
