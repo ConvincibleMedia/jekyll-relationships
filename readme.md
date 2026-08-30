@@ -151,11 +151,31 @@ frontmatter:
 
 ### Scope
 
-`frontmatter.scope` is optional. When configured, a document is identified by its primary key, optionally within a collection, within a scope. This allows the same primary key to occur in different contexts, e.g. where `locale` is `en` or `fr`.
+`frontmatter.scope` is optional. When configured, a document is identified by its collection, primary key and complete scope. This allows the same primary key to occur in different contexts, e.g. where `locale` is `en` or `fr`, while requiring it to remain unique within each exact scope combination.
 
-Crucially, **scope values are drawn from the referring document**. For instance, with `scope: locale`, document A can refer to document B by `id` only. Document A's own `locale` is `en`. Document B is identified as the document with the given `id` and `locale: en`.
+Scope accepts one path, a comma-delimited list of paths, or an array of paths:
 
-Scope can be set globally and then unset with `scope: null`, or redefined, on particular relationships if desired.
+```yaml
+frontmatter:
+  scope: locale
+
+# Equivalent multi-field forms:
+frontmatter:
+  scope: locale, meta.region
+
+frontmatter:
+  scope:
+  - locale
+  - meta.region
+```
+
+Each entry is a non-empty frontmatter path and may use dot notation. The configured path remains the literal field name in reference scope hashes, so `meta.region` is represented by the key `meta.region`, not a nested hash.
+
+By default, every scope value is inherited from the referring document. For instance, with `scope: locale`, document A can refer to document B by `id` only. If A's `locale` is `en`, B is resolved using both the given `id` and `locale: en`.
+
+Every configured field is required. A target must contain every field and its values must match the effective scope exactly. Missing and `null` values are invalid rather than wildcards, and lookup does not fall back to a target in another scope.
+
+Scope follows the normal global, relationship-level and `to`-target override chain. If scope is configured globally, relationships inherit it unless they redefine it or explicitly set `scope: null`. If no global scope exists, scope may be introduced for only one relationship or target; relationships outside that override remain unscoped. An unscoped relationship is therefore one whose effective configuration has no scope fields, rather than necessarily one belonging to an entirely unscoped site.
 
 
 ### Output
@@ -189,14 +209,14 @@ You can unset `base` with an empty string.
 
 ### Defaults and Overrides
 
-`frontmatter` settings for any given relationship is determined by a series of overrides:
+`frontmatter` settings for any given relationship are determined by a series of overrides:
 
 1. Built-in defaults
 2. Global config
 3. Override at relationship level
 4. Override at `to` level
 
-For instance if `base` is defined higher in the chain, it will apply by default to any `frontmatter` given lower down, unless it is unset at that level.
+For instance if `base` or `scope` is defined higher in the chain, it will apply by default to any `frontmatter` given lower down, unless it is overridden or unset at that level.
 
 
 ## References
@@ -223,8 +243,21 @@ The `references` config lets you modify the shape of reference hashes. Its keys 
 
 * `<key>` exactly (required): this key gives the foreign key, and must be present.
 * `<collection>`: this key gives the collection in which the foreign document exists.
-* `<scope>`: this key gives a hash of scope overrides and receives the complete effective scope after resolution.
+* `<scope>`: this key gives a hash of scope overrides and receives the complete effective scope after resolution. Despite supporting multiple fields, the placeholder is always the singular `<scope>`.
 * `<page>`: this key will be set to the actual `Jekyll::Document` instance for the foreign document.
+
+Only one property may map to `<scope>`. When any relationship has an effective scope, the reference template must define this placeholder. Its property name is arbitrary:
+
+```yaml
+relationships:
+  references:
+    id: <key>
+    collection: <collection>
+    context: <scope>
+    page: <page>
+```
+
+Here, `context` is the reserved scope property in reference input and resolved output.
 
 Example:
 
@@ -247,16 +280,37 @@ parent:
     locale: fr
 ```
 
-The reserved scope property must be a hash. Omitted fields inherit from the referring document. Every override key must exactly name a configured scope field, exactly as it was defined in `frontmatter`.
+The reserved scope property must be a hash. Omitted fields inherit from the referring document. Supplying a field with a `null` value is invalid rather than equivalent to omitting it. Every override key must exactly name a configured scope field, exactly as it was defined in `frontmatter`:
 
-Following resolution, references are upgraded to the configured hash form. Other properties on an input hash remain free-form metadata.
+```yaml
+parent:
+  id: B
+  scope:
+    locale: en
+    meta.region: uk # literal key for the configured `meta.region` path
+```
+
+Following resolution, a scoped reference contains its complete effective scope, including inherited fields:
+
+```yaml
+id: B
+collection: pages
+scope:
+  locale: en
+  meta.region: uk
+page: <Jekyll::Document>
+```
+
+Unscoped relationships omit the reserved scope property. Other properties on an input hash remain free-form metadata, but the reserved scope property is kept separately for lookup and cannot be overwritten by resolver metadata.
 
 
 ## Primary Keys
 
-**Primary keys must be unique** within a collection and scope.
+**Primary keys must be unique** within a collection and exact complete scope. For example, `B` may occur once in scope `{ locale: en }` and once in `{ locale: fr }`, but may not occur twice in either scope.
 
-If the collection isn't given by the reference, the existing eligible collections are searched for the foreign key and then constrained by the effective scope.
+If the collection isn't given by the reference, the existing eligible collections are searched for the foreign key and then constrained by the effective scope. Scope does not change collection selection or cross-collection ambiguity behaviour.
+
+When a relationship is unscoped, primary-key parsing, uniqueness and lookup behave as before, and resolved references do not gain a scope property.
 
 When the `primary` config is `nil`, (which is the default), the document "path" is used as the primary key. This guarantees uniqueness across the whole site. Document path is `Document#relative_path` with leading `_` and trailing `Document.extname` removed, giving strings like `products/shoes` for `shoes.md` in the `products` collection.
 
