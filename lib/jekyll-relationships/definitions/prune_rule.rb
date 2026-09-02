@@ -11,17 +11,19 @@ module Definitions
 # Raw relationship entries may expand into many concrete relationship members.
 # After the global prune settings have been applied, each expanded prune rule
 # targets exactly one subject collection and one set of configured relationship
-# members whose neighbour counts should be combined for that subject.
+# members. Rules select by neighbour count, frontmatter values, or both.
 class PruneRule
-	attr_reader :kind, :subject_collection, :members, :min, :depth, :entry_index
+	attr_reader :kind, :subject_collection, :members, :min, :depth, :where, :entry_index
 
 	# Captures one immutable prune rule.
-	def initialize(kind:, subject_collection:, members:, min:, depth:, inverse:, entry_index:)
+	def initialize(kind:, subject_collection:, members:, min:, depth:, where:, inverse:, entry_index:)
 		@kind = kind
 		@subject_collection = subject_collection
 		@members = members.sort_by(&:sequence).freeze
 		@min = min
 		@depth = depth
+		@where = where
+		@frontmatter_matcher = Support::FrontmatterMatcher.new(expected_values: @where) unless @where.nil?
 		@inverse = inverse
 		@entry_index = entry_index
 	end
@@ -39,6 +41,20 @@ class PruneRule
 	# Returns true when this rule prunes a normal relationship subject.
 	def normal?
 		@kind == :normal
+	end
+
+	# Returns true when the document satisfies this rule's frontmatter mode.
+	def frontmatter_selected?(document)
+		return true unless @frontmatter_matcher
+
+		@frontmatter_matcher.matches?(document.data)
+	end
+
+	# Returns true when the document satisfies this rule's relationship mode.
+	def relationship_selected?(graph:, document:)
+		return true if @min.nil?
+
+		neighbour_documents(graph: graph, document: document).length < @min
 	end
 
 	# Returns the combined neighbour documents for one subject document.

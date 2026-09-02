@@ -291,33 +291,51 @@ class TreePhase
 		end.sort_by(&:relative_path)
 	end
 
-	# Attempts to reconnect one orphan to its surviving original grandparents.
+	# Attempts to reconnect one orphan to its nearest surviving original ancestors.
 	def reattach_orphan!(graph:, document:)
-		grandparent_candidates_for(graph: graph, document: document).each do |candidate|
+		nearest_surviving_ancestor_candidates_for(graph: graph, document: document).each do |candidate|
 			graph.add_edge(
 				parent_document: candidate.fetch(:document),
 				child_document: document,
 				tree_settings: candidate.fetch(:tree_settings),
 				definition: candidate.fetch(:definition),
-				source_description: 'pruning grandparents'
+				source_description: 'pruning ancestors'
 			)
 		end
 
 		graph.parent_documents_for(document).any?
 	end
 
-	# Returns every surviving grandparent candidate for one orphan.
-	def grandparent_candidates_for(graph:, document:)
+	# Returns the first surviving ancestor on every original parent lineage.
+	def nearest_surviving_ancestor_candidates_for(graph:, document:)
 		@provenance.original_parent_entries_for(document).each_with_object({}) do |parent_entry, candidates|
-			@provenance.original_parent_entries_for(parent_entry.fetch(:document)).each do |grandparent_entry|
-				grandparent_document = grandparent_entry.fetch(:document)
-				next unless graph.active_document?(grandparent_document)
-
-				candidates[grandparent_document.object_id] ||= {
-					document: grandparent_document,
+			nearest_surviving_ancestors_for(
+				graph: graph,
+				document: parent_entry.fetch(:document),
+				visited_document_ids: {}
+			).each do |ancestor_document|
+				candidates[ancestor_document.object_id] ||= {
+					document: ancestor_document,
 					definition: parent_entry.fetch(:definition),
 					tree_settings: parent_entry.fetch(:tree_settings)
 				}
+			end
+		end.values
+	end
+
+	# Walks removed provenance nodes until each lineage reaches an active document.
+	def nearest_surviving_ancestors_for(graph:, document:, visited_document_ids:)
+		return [] if visited_document_ids.key?(document.object_id)
+		return [document] if graph.active_document?(document)
+
+		lineage_visited_document_ids = visited_document_ids.merge(document.object_id => true)
+		@provenance.original_parent_entries_for(document).each_with_object({}) do |parent_entry, ancestors|
+			nearest_surviving_ancestors_for(
+				graph: graph,
+				document: parent_entry.fetch(:document),
+				visited_document_ids: lineage_visited_document_ids
+			).each do |ancestor_document|
+				ancestors[ancestor_document.object_id] ||= ancestor_document
 			end
 		end.values
 	end

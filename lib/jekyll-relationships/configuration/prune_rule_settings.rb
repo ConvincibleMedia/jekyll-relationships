@@ -11,10 +11,10 @@ class Configuration
 	#
 	# Relationship entries and hash-form targets may opt into pruning by defining
 	# a minimum neighbour count and, optionally, switching the subject of the rule
-	# to the inverse side of the relationship. Tree prune rules may also
-	# constrain which depths are eligible for pruning.
+	# to the inverse side of the relationship. Tree prune rules may constrain
+	# eligible depths, select frontmatter values, or combine both modes.
 	class PruneRuleSettings
-		attr_reader :mode, :min, :depth
+		attr_reader :mode, :min, :depth, :where
 
 		# Interprets one loose prune config value.
 		def self.build(raw_config:, context:)
@@ -31,6 +31,7 @@ class Configuration
 				@mode = 'direct'
 				@min = normalise_min(raw_config, context: context)
 				@depth = nil
+				@where = nil
 				return
 			end
 
@@ -43,11 +44,15 @@ class Configuration
 			@min = normalise_min(
 				Configuration::HashUtilities.fetch_hash_value(raw_config, 'min'),
 				context: context
-			)
+			) if Configuration::HashUtilities.hash_key?(raw_config, 'min')
 			@depth = normalise_depth(
 				Configuration::HashUtilities.hash_key?(raw_config, 'depth') ? Configuration::HashUtilities.fetch_hash_value(raw_config, 'depth') : nil,
 				context: context
 			)
+			@where = normalise_where(
+				Configuration::HashUtilities.fetch_hash_value(raw_config, 'where'),
+				context: context
+			) if Configuration::HashUtilities.hash_key?(raw_config, 'where')
 		end
 
 		# Returns true when the rule prunes the inverse side of the relationship.
@@ -73,7 +78,7 @@ class Configuration
 			raise ConfigurationError, "Unsupported `#{context}.mode` value `#{raw_mode}`."
 		end
 
-		# Resolves the configured minimum count and rejects non-positive values.
+		# Resolves the configured minimum count and rejects missing or non-positive values.
 		def normalise_min(raw_min, context:)
 			raise ConfigurationError, "`#{context}` must define `min`." if raw_min.nil?
 
@@ -91,6 +96,29 @@ class Configuration
 			raise ConfigurationError, "`#{context}.depth` cannot be 0." if interpreted_depth == 0
 
 			interpreted_depth
+		end
+
+		# Resolves a non-empty hash of valid dot paths to exact expected values.
+		def normalise_where(raw_where, context:)
+			raise ConfigurationError, "`#{context}.where` must be a non-empty hash." unless raw_where.is_a?(Hash) && !raw_where.empty?
+
+			raw_where.each_with_object({}) do |(raw_path, expected_value), where|
+				path = normalise_where_path(raw_path, context: context)
+				raise ConfigurationError, "`#{context}.where` defines path `#{path}` more than once." if where.key?(path)
+
+				where[path] = expected_value
+			end.freeze
+		end
+
+		# Resolves one dot path and rejects blank segments.
+		def normalise_where_path(raw_path, context:)
+			path = raw_path.to_s.strip
+			segments = path.split('.', -1).map(&:strip)
+			if path.empty? || segments.any?(&:empty?)
+				raise ConfigurationError, "`#{context}.where` paths must contain non-blank dot-separated fields."
+			end
+
+			segments.join('.')
 		end
 	end
 end

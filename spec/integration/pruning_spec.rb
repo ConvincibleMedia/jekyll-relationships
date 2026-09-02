@@ -645,6 +645,475 @@ RSpec.describe 'pruning' do
 		end
 	end
 
+	it 'prunes exact frontmatter matches and contracts consecutive removed tree nodes' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'where' => {
+							'exists' => false
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'root', { 'exists' => true }),
+			collection_document('pages', 'removed-a', {
+				'exists' => false,
+				'relationships' => {
+					'parent' => 'pages/root'
+				}
+			}),
+			collection_document('pages', 'removed-b', {
+				'exists' => false,
+				'relationships' => {
+					'parent' => 'pages/removed-a'
+				}
+			}),
+			collection_document('pages', 'leaf', {
+				'relationships' => {
+					'parent' => 'pages/removed-b'
+				}
+			}),
+			collection_document('pages', 'string-false', {
+				'exists' => 'false',
+				'relationships' => {
+					'parent' => 'pages/root'
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+			leaf = document_for(site, 'pages', 'leaf')
+
+			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(%w[leaf root string-false])
+			expect(reference_ids(leaf.data.fetch('relationships').fetch('parents'))).to eq(['pages/root'])
+		end
+	end
+
+	it 'matches nested frontmatter with AND and distinguishes null from missing' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'where' => {
+							'meta.status' => 'hidden',
+							'meta.reason' => nil
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'matching', {
+				'meta' => {
+					'status' => 'hidden',
+					'reason' => nil
+				}
+			}),
+			collection_document('pages', 'missing-reason', {
+				'meta' => {
+					'status' => 'hidden'
+				}
+			}),
+			collection_document('pages', 'visible', {
+				'meta' => {
+					'status' => 'visible',
+					'reason' => nil
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(%w[missing-reason visible])
+		end
+	end
+
+	it 'applies inverse where pruning to the tree target collection' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'sections',
+					'mode' => 'parent',
+					'prune' => {
+						'mode' => 'inverse',
+						'where' => {
+							'hidden' => true
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('sections', 'hidden', { 'hidden' => true }),
+			collection_document('sections', 'visible', { 'hidden' => false }),
+			collection_document('pages', 'child', {
+				'relationships' => {
+					'parent' => 'sections/hidden'
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[pages sections], relationships: relationships, files: files) do |site, _files|
+			child = document_for(site, 'pages', 'child')
+
+			expect(site.collections.fetch('sections').docs.map(&:basename_without_ext)).to eq(['visible'])
+			expect(reference_ids(child.data.fetch('relationships').fetch('parents'))).to eq([])
+		end
+	end
+
+	it 'requires both where and relationship modes to select a tree document' do
+		relationships = {
+			'prune' => {
+				'tree' => {
+					'orphans' => 'orphan'
+				}
+			},
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'min' => 2,
+						'depth' => -1,
+						'where' => {
+							'hidden' => true
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'root-a'),
+			collection_document('pages', 'root-b'),
+			collection_document('pages', 'selected', {
+				'hidden' => true,
+				'relationships' => {
+					'parent' => 'pages/root-a'
+				}
+			}),
+			collection_document('pages', 'where-mismatch', {
+				'hidden' => false,
+				'relationships' => {
+					'parent' => 'pages/root-a'
+				}
+			}),
+			collection_document('pages', 'count-mismatch', {
+				'hidden' => true,
+				'relationships' => {
+					'parents' => ['pages/root-a', 'pages/root-b']
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(%w[count-mismatch root-a root-b where-mismatch])
+		end
+	end
+
+	it 'combines inverse where, child counts, and positive depth selection' do
+		relationships = {
+			'prune' => {
+				'tree' => {
+					'orphans' => 'orphan'
+				}
+			},
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'sections',
+					'mode' => 'parent',
+					'prune' => {
+						'mode' => 'inverse',
+						'min' => 2,
+						'depth' => 1,
+						'where' => {
+							'hidden' => true
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('sections', 'selected', { 'hidden' => true }),
+			collection_document('sections', 'count-mismatch', { 'hidden' => true }),
+			collection_document('sections', 'where-mismatch', { 'hidden' => false }),
+			collection_document('pages', 'selected-child', {
+				'relationships' => {
+					'parent' => 'sections/selected'
+				}
+			}),
+			collection_document('pages', 'count-child-a', {
+				'relationships' => {
+					'parent' => 'sections/count-mismatch'
+				}
+			}),
+			collection_document('pages', 'count-child-b', {
+				'relationships' => {
+					'parent' => 'sections/count-mismatch'
+				}
+			}),
+			collection_document('pages', 'where-child', {
+				'relationships' => {
+					'parent' => 'sections/where-mismatch'
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[pages sections], relationships: relationships, files: files) do |site, _files|
+			selected_child = document_for(site, 'pages', 'selected-child')
+
+			expect(site.collections.fetch('sections').docs.map(&:basename_without_ext)).to eq(%w[count-mismatch where-mismatch])
+			expect(reference_ids(selected_child.data.fetch('relationships').fetch('parents'))).to eq([])
+		end
+	end
+
+	it 'keeps orphan-policy behaviour when where removes a parent without ancestors' do
+		expected_pages_by_mode = {
+			'grandparents' => ['child'],
+			'grandparents required' => [],
+			'prune' => [],
+			'orphan' => ['child']
+		}
+
+		expected_pages_by_mode.each do |orphan_mode, expected_pages|
+			relationships = {
+				'prune' => {
+					'tree' => {
+						'orphans' => orphan_mode
+					}
+				},
+				'relationships' => [
+					{
+						'from' => 'pages',
+						'to' => 'self',
+						'mode' => 'parent',
+						'prune' => {
+							'where' => {
+								'remove' => true
+							}
+						}
+					}
+				]
+			}
+			files = relationship_site_files(
+				collection_document('pages', 'parent', { 'remove' => true }),
+				collection_document('pages', 'child', {
+					'relationships' => {
+						'parent' => 'pages/parent'
+					}
+				})
+			)
+
+			build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+				expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(expected_pages)
+				if expected_pages.include?('child')
+					child = document_for(site, 'pages', 'child')
+					expect(reference_ids(child.data.fetch('relationships').fetch('parents'))).to eq([])
+				end
+			end
+		end
+	end
+
+	it 'deduplicates ordered transitive ancestors before enforcing the parent limit' do
+		relationships = {
+			'tree' => {
+				'max' => {
+					'parents' => 2
+				}
+			},
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'where' => {
+							'remove' => true
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'grand-a'),
+			collection_document('pages', 'grand-b'),
+			collection_document('pages', 'grand-c'),
+			collection_document('pages', 'removed-a', {
+				'remove' => true,
+				'relationships' => {
+					'parents' => ['pages/grand-b', 'pages/grand-a']
+				}
+			}),
+			collection_document('pages', 'removed-b', {
+				'remove' => true,
+				'relationships' => {
+					'parents' => ['pages/grand-b', 'pages/grand-c']
+				}
+			}),
+			collection_document('pages', 'leaf', {
+				'relationships' => {
+					'parents' => ['pages/removed-a', 'pages/removed-b']
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+			leaf = document_for(site, 'pages', 'leaf')
+
+			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(%w[grand-a grand-b grand-c leaf])
+			expect(reference_ids(leaf.data.fetch('relationships').fetch('parents'))).to eq([
+				'pages/grand-b',
+				'pages/grand-a'
+			])
+		end
+	end
+
+	it 'preserves scoped tree identity and permalinks while contracting where matches' do
+		relationships = {
+			'frontmatter' => {
+				'base' => '',
+				'primary' => 'id',
+				'scope' => 'locale'
+			},
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'where' => {
+							'flags.remove' => true
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'root-en', { 'id' => 'root', 'locale' => 'en', 'permalink' => '/en/root/' }),
+			collection_document('pages', 'root-fr', { 'id' => 'root', 'locale' => 'fr', 'permalink' => '/fr/root/' }),
+			collection_document('pages', 'removed-en', {
+				'id' => 'branch',
+				'locale' => 'en',
+				'parent' => 'root',
+				'flags' => {
+					'remove' => true
+				}
+			}),
+			collection_document('pages', 'branch-fr', {
+				'id' => 'branch',
+				'locale' => 'fr',
+				'parent' => 'root',
+				'flags' => {
+					'remove' => false
+				}
+			}),
+			collection_document('pages', 'leaf-en', { 'id' => 'leaf', 'locale' => 'en', 'parent' => 'branch', 'permalink' => '/en/leaf/' }),
+			collection_document('pages', 'leaf-fr', { 'id' => 'leaf', 'locale' => 'fr', 'parent' => 'branch', 'permalink' => '/fr/leaf/' })
+		)
+
+		build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+			en_leaf = document_for(site, 'pages', 'leaf-en')
+			fr_leaf = document_for(site, 'pages', 'leaf-fr')
+			en_parent = en_leaf.data.fetch('parents').first
+			fr_parent = fr_leaf.data.fetch('parents').first
+
+			expect(en_parent.fetch('page').basename_without_ext).to eq('root-en')
+			expect(en_parent.fetch('scope')).to eq('locale' => 'en')
+			expect(fr_parent.fetch('page').basename_without_ext).to eq('branch-fr')
+			expect(fr_parent.fetch('scope')).to eq('locale' => 'fr')
+			expect(en_leaf.url).to eq('/en/leaf/')
+			expect(fr_leaf.url).to eq('/fr/leaf/')
+		end
+	end
+
+	it 'contracts URL-inferred edges without changing the surviving URL' do
+		relationships = {
+			'tree' => {
+				'url' => true
+			},
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'where' => {
+							'remove' => true
+						}
+					}
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'root', { 'permalink' => '/guides/index.html' }),
+			collection_document('pages', 'removed', { 'remove' => true, 'permalink' => '/guides/chapter/index.html' }),
+			collection_document('pages', 'leaf', { 'permalink' => '/guides/chapter/intro/' })
+		)
+
+		build_relationship_site(collections: %w[pages], relationships: relationships, files: files) do |site, _files|
+			leaf = document_for(site, 'pages', 'leaf')
+
+			expect(reference_ids(leaf.data.fetch('relationships').fetch('parents'))).to eq(['pages/root'])
+			expect(leaf.url).to eq('/guides/chapter/intro/')
+		end
+	end
+
+	it 'removes where-pruned documents from normal relationship resolution' do
+		relationships = {
+			'relationships' => [
+				{
+					'from' => 'pages',
+					'to' => 'self',
+					'mode' => 'parent',
+					'prune' => {
+						'where' => {
+							'archived' => true
+						}
+					}
+				},
+				{
+					'from' => 'articles',
+					'to' => 'pages'
+				}
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('pages', 'kept'),
+			collection_document('pages', 'removed', { 'archived' => true }),
+			collection_document('articles', 'guide', {
+				'relationships' => {
+					'pages' => ['pages/kept', 'pages/removed']
+				}
+			})
+		)
+
+		build_relationship_site(collections: %w[articles pages], relationships: relationships, files: files) do |site, _files|
+			article = document_for(site, 'articles', 'guide')
+
+			expect(site.collections.fetch('pages').docs.map(&:basename_without_ext)).to eq(['kept'])
+			expect(reference_ids(article.data.fetch('relationships').fetch('pages'))).to eq(['pages/kept'])
+		end
+	end
+
 	it 'only prunes nodes beyond the selected tree depth when depth is negative' do
 		relationships = {
 			'prune' => {
