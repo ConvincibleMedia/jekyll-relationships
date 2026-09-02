@@ -107,7 +107,7 @@ Each array item has:
   * `link` (default): `from` links to `to`.
   * `parent`/`child`: items in `from` can have items in `to` as their parent/child (which also implies the reverse relationship). See [Trees](#trees) below.
   * `bidirectional`: like `link`, but whenever a link is added, it is also added to the target in the reverse direction automatically.
-* `prune` (optional): remove documents whose finally-resolved relationship count for this entry is too low. See [Pruning](#pruning) below.
+* `prune` (optional): remove documents whose finally-resolved relationship count is too low, or select tree documents by frontmatter values. See [Pruning](#pruning) below.
 
 Duplicate or clashing relationship definitions will throw an error. A bidirectional relationship "uses up" the reverse definition, so "from A to B, bidirectional" followed by a "from B to A, link/bidirectional" definition is a duplicate and throws an error.
 
@@ -517,7 +517,7 @@ references:
 
 ## Pruning
 
-You can remove certain pages from your site ("prune" them) according to the number of finally-resolved relationships on them. This is controlled with a `prune` key which you add to the relationship definition:
+You can remove certain pages from your site ("prune" them) according to their finally-resolved relationship count. Tree relationships can also prune pages selected by exact frontmatter values. This is controlled with a `prune` key which you add to the relationship definition:
 
 ```yaml
 relationships:
@@ -538,6 +538,12 @@ relationships:
     prune:
       min: 2 # prune a category if it has fewer than 2 parents
       depth: -1 # only prune non-root nodes
+  - from: pages
+    to: self
+    mode: parent
+    prune:
+      where:
+        exists: false # prune pages whose exists value is the boolean false
   - from: products
     mode: parent
     to:
@@ -553,15 +559,34 @@ relationships:
       orphans: grandparents # default
 ```
 
-`prune` on each relationship/target entry allows:
+Normal relationship pruning requires `min`. Tree pruning supports a relationship mode, a frontmatter mode, or both:
 
-* `min` (required): the minimum number of related documents needed to survive.
+* Relationship mode requires both `min` and `depth`:
+  * `min`: the minimum number of related documents needed to survive.
+  * `depth`: which tree nodes are eligible for relationship-count pruning:
+    * `1` selects roots, `2` selects roots and their children, etc.
+    * `-1` and negative integers are the negation of their positive counterparts. Thus `-2` selects everything beyond the first two levels.
+* Frontmatter mode requires a non-empty `where` hash of dot-separated frontmatter paths to expected values.
 * `mode: inverse` (optional): prune the `to` side instead of the `from` side.
-* `depth` (required if pruning a tree): only for tree relationships, determines which tree nodes can be pruned:
-  * `1` selects roots, `2` would be roots and their chlidren, etc.
-  * `-1` and negative integers are the negation of their positive counterparts. So `-2` means all but the first two levels of the tree are eligible for pruning.
 
-`prune` can also be `false` to disable pruning at that level, or an integer as a shortcut for `prune: min: int`.
+When both tree modes are present, a document is pruned only when `where` matches and the `min`/`depth` mode also selects it. `where` is not supported on normal relationships.
+
+`prune` can also be `false` to disable pruning at that level. Normal relationships accept an integer as a shortcut for `prune: min: int`; tree relationships do not.
+
+### Frontmatter matching
+
+Each `where` entry is matched against the pruning subject: the `from` collection normally, or the inverse subject when `mode: inverse` is configured.
+
+```yaml
+prune:
+  where:
+    exists: false
+    meta.status: hidden
+```
+
+All entries must match. Paths traverse nested hashes only; arrays and hashes can instead be matched as complete terminal values. Matching is exact and type-sensitive, so `false` does not match `"false"`, and `1` does not match `1.0`. A present `null` matches an expected `null`, while a missing path never matches.
+
+A where-only rule prunes every matching subject regardless of its relationship count.
 
 ### Combine
 
@@ -586,10 +611,12 @@ Pruning is iterative. E.g. if pruning causes more nodes to trigger pruning rules
 
 If pruning removes a node from a tree, any children that lose all parents become orphans. `relationships.prune.tree.orphans` controls what happens:
 
-* `grandparents` (default): reconnect to the pruned node's original grandparents, if any.
-* `grandparents required`: as above, but also remove the orphan if there is no grandparent to connect to.
+* `grandparents` (default): follow each original parent lineage through consecutively removed nodes and reconnect to its nearest surviving ancestor. Leave the document parentless if no ancestor survives.
+* `grandparents required`: reconnect as above, but remove the orphan if no original ancestor survives.
 * `prune`: prune all orphans recursively.
-* `orphan`: leave them parentless.
+* `orphan`: leave them parentless without attempting reconnection.
+
+Ancestor candidates retain their original order, are deduplicated, and continue to respect configured parent limits and cycle protection. Pruning does not change document URLs or permalinks.
 
 
 ## Keywords
