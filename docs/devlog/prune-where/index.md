@@ -2,9 +2,9 @@
 
 Add tree-pruning selection by exact frontmatter values while preserving the existing pruning pipeline and tree guarantees.
 
-Status: verification pending
+Status: complete
 
-Current stage: verification
+Current stage: complete
 
 ## Scope
 
@@ -19,7 +19,7 @@ Current stage: verification
 ## Stages
 
 * Implementation: complete
-* Verification and completion: pending test execution
+* Verification and completion: complete
 
 ## Key decisions and findings
 
@@ -29,4 +29,11 @@ Current stage: verification
 * Each original parent lineage stops at its first surviving ancestor; candidates are deduplicated in original traversal order.
 * Existing orphan policies remain authoritative when no ancestor survives.
 * The existing orphan repair only searches one generation and therefore requires transitive provenance traversal for consecutive removals.
-* Project coding guidance prohibits running tests or builds without an explicit request; Ruby syntax verification is complete, but behavioural suite execution remains pending.
+* Behavioural verification passed under the repository-local Ruby version selected by `rbenv` in WSL.
+
+
+## Verification
+
+* Full RSpec suite: 171 examples, 0 failures.
+* Ruby: 2.4.4 under WSL, selected from `.ruby-version` by `rbenv`.
+* Randomisation seed: 9900.
