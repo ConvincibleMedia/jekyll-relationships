@@ -10,6 +10,7 @@ module Support
 	module Placeholders
 		KEY = '<key>'.freeze
 		COLLECTION = '<collection>'.freeze
+		SCOPE = '<scope>'.freeze
 		PAGE = '<page>'.freeze
 		COUNT = '<count>'.freeze
 	end

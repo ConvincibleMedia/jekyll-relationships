@@ -43,7 +43,7 @@ class Engine
 		return if @configuration.collections.empty?
 
 		@registry.validate_collections!
-		@registry.validate_primary_paths!(primary_paths: @configuration.primary_paths)
+		@registry.validate_identity_schemes!(identity_schemes: @configuration.identity_schemes)
 		initial_active_document_ids = all_active_document_ids
 		initial_tree_seed_graph = build_tree_graph(active_document_ids: initial_active_document_ids)
 		normal_seed = NormalSeed.new(engine: self, active_document_ids: initial_active_document_ids)

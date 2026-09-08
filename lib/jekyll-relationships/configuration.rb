@@ -53,10 +53,6 @@ class Configuration
 			),
 			string_array: @string_array
 		)
-		@reference_template = References::Template.new(
-			config: build_reference_config,
-			count_enabled: @multiple_settings.count?
-		)
 		@tree_settings = TreeSettings.defaults(
 			string_array: @string_array
 		).merge_level(
@@ -81,6 +77,11 @@ class Configuration
 		@configured_relationships = parsed_result.fetch(:configured_relationships)
 		@normal_prune_rules = parsed_result.fetch(:normal_prune_rules)
 		@tree_prune_rules = parsed_result.fetch(:tree_prune_rules)
+		@reference_template = References::Template.new(
+			config: build_reference_config(scope_enabled: scope_configured?),
+			count_enabled: @multiple_settings.count?
+		)
+		validate_scope_reference_template!
 		attach_resolvers!(parser: parsed_relationships)
 	end
 
@@ -119,6 +120,24 @@ class Configuration
 		(normal_paths + tree_paths).uniq
 	end
 
+	# Returns every distinct primary-key and scope scheme used by configured relationships.
+	def identity_schemes
+		definitions = @normal_relationships.values.flat_map(&:values) + @tree_relationships
+		definitions.group_by do |definition|
+			[
+				definition.primary_path,
+				definition.scope_fields.map(&:signature)
+			]
+		end.map do |_, matching_definitions|
+			{
+				primary_path: matching_definitions.first.primary_path,
+				scope_fields: matching_definitions.first.scope_fields,
+				collections: matching_definitions.flat_map { |definition| [definition.from_collection, definition.to_collection] }.uniq.sort,
+				relationships: matching_definitions.map { |definition| "#{definition.from_collection} -> #{definition.to_collection}" }.uniq
+			}
+		end
+	end
+
 	private
 
 	# Builds the active global enabled setting.
@@ -142,7 +161,7 @@ class Configuration
 			string_array: @string_array
 		)
 		@reference_template = References::Template.new(
-			config: default_reference_config,
+			config: default_reference_config(scope_enabled: false),
 			count_enabled: @multiple_settings.count?
 		)
 		@tree_settings = TreeSettings.defaults(string_array: @string_array)
@@ -195,8 +214,8 @@ class Configuration
 	end
 
 	# Builds the resolved reference template config.
-	def build_reference_config
-		default_references = default_reference_config
+	def build_reference_config(scope_enabled:)
+		default_references = default_reference_config(scope_enabled: scope_enabled)
 		explicit_config = Configuration::HashUtilities.fetch_hash_value(@raw_config, 'references')
 		return explicit_config if explicit_config.is_a?(Hash)
 
@@ -212,17 +231,33 @@ class Configuration
 	end
 
 	# Builds the default reference template shape for the active duplicate mode.
-	def default_reference_config
+	def default_reference_config(scope_enabled:)
 		default_references = {
 			'id' => Jekyll::Plugins::Relationships::Support::Placeholders::KEY,
 			'collection' => Jekyll::Plugins::Relationships::Support::Placeholders::COLLECTION,
 			'page' => Jekyll::Plugins::Relationships::Support::Placeholders::PAGE
 		}
+		if scope_enabled
+			default_references['scope'] = Jekyll::Plugins::Relationships::Support::Placeholders::SCOPE
+		end
 		if @multiple_settings.count?
 			default_references['count'] = Jekyll::Plugins::Relationships::Support::Placeholders::COUNT
 		end
 
 		default_references
+	end
+
+	# Returns true when at least one concrete relationship uses scoped identity.
+	def scope_configured?
+		identity_schemes.any? { |scheme| !scheme.fetch(:scope_fields).empty? }
+	end
+
+	# Ensures scoped relationships have a reserved location for their complete effective scope.
+	def validate_scope_reference_template!
+		return unless scope_configured?
+		return if @reference_template.scope_property
+
+		raise ConfigurationError, 'Reference config must define exactly one <scope> property when any relationship configures `frontmatter.scope`.'
 	end
 
 	# Attaches registered resolver classes to matching concrete relationships.

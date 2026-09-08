@@ -241,6 +241,7 @@ class Configuration
 				from_collection: from_collection,
 				to_collection: to_collection,
 				primary_path: frontmatter.primary_path,
+				scope_fields: frontmatter.scope_fields,
 				parent_child_pairs: parent_child_pairs(from_collection: from_collection, to_collection: to_collection, mode: mode),
 				tree_settings: tree_settings,
 				debug: debug,
@@ -259,6 +260,7 @@ class Configuration
 				from_collection: from_collection,
 				to_collection: to_collection,
 				primary_path: frontmatter.primary_path,
+				scope_fields: frontmatter.scope_fields,
 				foreign_paths: frontmatter.foreign_paths_for(to_collection: to_collection),
 				output_path: frontmatter.output_path_for(to_collection: to_collection),
 				debug: debug,
@@ -291,11 +293,25 @@ class Configuration
 				if prune_configuration.shortcut?
 					raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot use `prune: <int>` on a tree relationship."
 				end
-				if prune_configuration.depth.nil?
+				if prune_configuration.min && prune_configuration.depth.nil?
 					raise ConfigurationError, "Relationship entry #{entry_index + 1} must define `prune.depth` when pruning a tree relationship."
 				end
-			elsif !prune_configuration.depth.nil?
-				raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot define `prune.depth` on a normal relationship."
+				if prune_configuration.min.nil? && prune_configuration.depth
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} must define `prune.min` when defining `prune.depth` on a tree relationship."
+				end
+				if prune_configuration.min.nil? && prune_configuration.where.nil?
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} must define either `prune.where` or both `prune.min` and `prune.depth` when pruning a tree relationship."
+				end
+			else
+				if prune_configuration.where
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot define `prune.where` on a normal relationship."
+				end
+				if !prune_configuration.depth.nil?
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} cannot define `prune.depth` on a normal relationship."
+				end
+				if prune_configuration.min.nil?
+					raise ConfigurationError, "Relationship entry #{entry_index + 1} must define `prune.min` when pruning a normal relationship."
+				end
 			end
 
 			prune_rules_for_entry(
@@ -358,6 +374,7 @@ class Configuration
 				members: members,
 				min: prune_configuration.min,
 				depth: prune_configuration.depth,
+				where: prune_configuration.where,
 				inverse: prune_configuration.inverse?,
 				entry_index: entry_index
 			)

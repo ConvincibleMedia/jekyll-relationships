@@ -9,9 +9,17 @@ class Configuration
 
 	# Encapsulates one merged frontmatter configuration block.
 	#
-	# Instances resolve `base`, `primary`, `foreign`, and `output` paths so the
+	# Instances resolve `base`, `primary`, `scope`, `foreign`, and `output` paths so the
 	# rest of the engine can work with explicit values only.
 	class Frontmatter
+		# Describes one configured scope field while preserving both its public name and its base-resolved document path.
+		ScopeField = Struct.new(:name, :path) do
+			# Returns a stable value signature suitable for registry cache keys.
+			def signature
+				[name, path]
+			end
+		end
+
 		# Builds one frontmatter configuration helper.
 		def initialize(raw_config:, string_array:)
 			@raw_config = raw_config.is_a?(Hash) ? raw_config : {}
@@ -32,6 +40,25 @@ class Configuration
 			return nil if raw_primary.nil?
 
 			apply_base(raw_primary.to_s)
+		end
+
+		# Returns the configured scope fields with their literal reference keys and resolved document paths.
+		def scope_fields
+			raw_scope = fetch_value('scope')
+			return [] if raw_scope.nil?
+			unless raw_scope.is_a?(String) || raw_scope.is_a?(Array)
+				raise ConfigurationError, '`frontmatter.scope` must be a string, comma-delimited string, or array of non-empty path strings.'
+			end
+
+			raw_paths = raw_scope.is_a?(String) ? @string_array.interpret(raw_scope, split: true, flatten: true) : raw_scope
+			if raw_paths.empty? || raw_paths.any? { |path| !path.is_a?(String) || path.strip.empty? }
+				raise ConfigurationError, '`frontmatter.scope` must contain one or more non-empty path strings.'
+			end
+
+			raw_paths.map do |path|
+				name = path.strip
+				ScopeField.new(name, apply_base(name)).freeze
+			end.uniq { |field| field.name }
 		end
 
 		# Returns the resolved foreign input paths for one target collection.

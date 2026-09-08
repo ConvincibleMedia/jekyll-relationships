@@ -2,6 +2,7 @@
 
 Plugin for Jekyll that allows collection documents to specify their relationships with each other, via many-to-many links. These can form trees, graphs or relational-database-like structures. Exposes the relationships in each document's frontmatter.
 
+
 ## Configuration
 
 How documents link to each other is specified by configuration.
@@ -17,6 +18,7 @@ relationships:
   frontmatter: # see Frontmatter below
     base: relationships # prepend to other keys
     primary: nil # use Document path as primary key
+    scope: nil # optional paths that narrow where the primary key is unique
     foreign: <collection> # because of base, treated as `relationships.<foreign>`
     output: nil # see Output below
 
@@ -24,6 +26,7 @@ relationships:
   references: # see References below
     id: <key>
     collection: <collection>
+    scope: <scope>
     page: <page>
 
   # Settings for tree relationships
@@ -104,7 +107,7 @@ Each array item has:
   * `link` (default): `from` links to `to`.
   * `parent`/`child`: items in `from` can have items in `to` as their parent/child (which also implies the reverse relationship). See [Trees](#trees) below.
   * `bidirectional`: like `link`, but whenever a link is added, it is also added to the target in the reverse direction automatically.
-* `prune` (optional): remove documents whose finally-resolved relationship count for this entry is too low. See [Pruning](#pruning) below.
+* `prune` (optional): remove documents whose finally-resolved relationship count is too low, or select tree documents by frontmatter values. See [Pruning](#pruning) below.
 
 Duplicate or clashing relationship definitions will throw an error. A bidirectional relationship "uses up" the reverse definition, so "from A to B, bidirectional" followed by a "from B to A, link/bidirectional" definition is a duplicate and throws an error.
 
@@ -120,17 +123,19 @@ The defined relationships will be processed and resolved. This will:
 Relationships between documents are specified by values in each document's frontmatter. Somewhere in the frontmatter of documents you must have:
 
 * A "Primary Key": a value that identifies this document
+* A "Scope" (optional): one or more frontmatter keys that narrow where the primary key is unique (see more below)
 * A "Foreign Key": a value that identifies another document's primary key
 
-You specify where in the frontmatter these primary/foreign keys exist, using:
+You specify where in the frontmatter these values exist, using:
 
 ```yaml
 frontmatter:
   primary: id # the frontmatter key `id` holds the primary key value
+  scope: locale, meta.region # the complete scope is read from both paths
   foreign: <collection> # <collection> is replaced by the label of a `to` collection. The frontmatter key that matches this label holds a reference to a document in that collection.
 ```
 
-* Both keys can be specified with dot-notation to access deeply nested keys, e.g. `meta.details.relationships.id`.
+* `primary`, every `scope` entry, and `foreign` can use dot-notation to access deeply nested keys, e.g. `meta.details.relationships.id`.
 * `<collection>` is valid only within `foreign`. Example:
   
   ```yaml
@@ -143,6 +148,35 @@ frontmatter:
 
   In `products` documents, this would find links to `categories` at `links.categories_links` and links to `tags` at `links.tags_links`.
 * `foreign` can be an array of frontmatter locations where references will be read. These will all be accumulated. Unless `output` is set, the first location will become the output location and others will be untouched.
+
+### Scope
+
+`frontmatter.scope` is optional. When configured, a document is identified by its collection, primary key and complete scope. This allows the same primary key to occur in different contexts, e.g. where `locale` is `en` or `fr`, while requiring it to remain unique within each exact scope combination.
+
+Scope accepts one path, a comma-delimited list of paths, or an array of paths:
+
+```yaml
+frontmatter:
+  scope: locale
+
+# Equivalent multi-field forms:
+frontmatter:
+  scope: locale, meta.region
+
+frontmatter:
+  scope:
+  - locale
+  - meta.region
+```
+
+Each entry is a non-empty frontmatter path and may use dot notation. The configured path remains the literal field name in reference scope hashes, so `meta.region` is represented by the key `meta.region`, not a nested hash.
+
+By default, every scope value is inherited from the referring document. For instance, with `scope: locale`, document A can refer to document B by `id` only. If A's `locale` is `en`, B is resolved using both the given `id` and `locale: en`.
+
+Every configured field is required. A target must contain every field and its values must match the effective scope exactly. Missing and `null` values are invalid rather than wildcards, and lookup does not fall back to a target in another scope.
+
+Scope follows the normal global, relationship-level and `to`-target override chain. If scope is configured globally, relationships inherit it unless they redefine it or explicitly set `scope: null`. If no global scope exists, scope may be introduced for only one relationship or target; relationships outside that override remain unscoped. An unscoped relationship is therefore one whose effective configuration has no scope fields, rather than necessarily one belonging to an entirely unscoped site.
+
 
 ### Output
 
@@ -159,12 +193,13 @@ relationships:
 
 ### Base
 
-Any definition of `frontmatter` may specify a `base` which will be prepended to both the `primary` and `foreign` keys within that `frontmatter` definition.
+Any definition of `frontmatter` may specify a `base` which will be prepended to the `primary`, `scope`, `foreign`, and `output` paths within that `frontmatter` definition. Scope keys in reference hashes remain the literal configured names without the base prefix.
 
 ```yaml
 frontmatter:
   base: links
   primary: id # treated as `links.id`
+  scope: locale # read from `links.locale`, represented as `locale` in reference hashes
   foreign: <collection> # treated as `links.<collection>`
 ```
 
@@ -174,14 +209,14 @@ You can unset `base` with an empty string.
 
 ### Defaults and Overrides
 
-`frontmatter` settings for any given relationship is determined by a series of overrides:
+`frontmatter` settings for any given relationship are determined by a series of overrides:
 
 1. Built-in defaults
 2. Global config
 3. Override at relationship level
 4. Override at `to` level
 
-For instance if `base` is defined higher in the chain, it will apply by default to any `frontmatter` given lower down, unless it is unset at that level.
+For instance if `base` or `scope` is defined higher in the chain, it will apply by default to any `frontmatter` given lower down, unless it is overridden or unset at that level.
 
 
 ## References
@@ -208,7 +243,21 @@ The `references` config lets you modify the shape of reference hashes. Its keys 
 
 * `<key>` exactly (required): this key gives the foreign key, and must be present.
 * `<collection>`: this key gives the collection in which the foreign document exists.
+* `<scope>`: this key gives a hash of scope overrides and receives the complete effective scope after resolution. Despite supporting multiple fields, the placeholder is always the singular `<scope>`.
 * `<page>`: this key will be set to the actual `Jekyll::Document` instance for the foreign document.
+
+Only one property may map to `<scope>`. When any relationship has an effective scope, the reference template must define this placeholder. Its property name is arbitrary:
+
+```yaml
+relationships:
+  references:
+    id: <key>
+    collection: <collection>
+    context: <scope>
+    page: <page>
+```
+
+Here, `context` is the reserved scope property in reference input and resolved output.
 
 Example:
 
@@ -221,14 +270,47 @@ relationships:
     page: <page>
 ```
 
-When relationships are processed, references are read loosely: strings are foreign keys, hashes look at the foreign key/collection keys only, ignoring others. Following resolution, all references are upgraded to the defined hash form (merging over any other keys on an existing hash).
+When relationships are processed, string references inherit their complete scope from the referring document. Hash references also inherit scope by default, but may override selected fields through the reserved scope property:
+
+```yaml
+parent:
+  id: B
+  collection: pages
+  scope:
+    locale: fr
+```
+
+The reserved scope property must be a hash. Omitted fields inherit from the referring document. Supplying a field with a `null` value is invalid rather than equivalent to omitting it. Every override key must exactly name a configured scope field, exactly as it was defined in `frontmatter`:
+
+```yaml
+parent:
+  id: B
+  scope:
+    locale: en
+    meta.region: uk # literal key for the configured `meta.region` path
+```
+
+Following resolution, a scoped reference contains its complete effective scope, including inherited fields:
+
+```yaml
+id: B
+collection: pages
+scope:
+  locale: en
+  meta.region: uk
+page: <Jekyll::Document>
+```
+
+Unscoped relationships omit the reserved scope property. Other properties on an input hash remain free-form metadata, but the reserved scope property is kept separately for lookup and cannot be overwritten by resolver metadata.
 
 
 ## Primary Keys
 
-**Primary keys must be unique** within a collection. However, if you set things up so that primary keys are unique across *all* collections, then you no longer need to know the collection of a document when linking to it: just the foreign key is needed.
+**Primary keys must be unique** within a collection and exact complete scope. For example, `B` may occur once in scope `{ locale: en }` and once in `{ locale: fr }`, but may not occur twice in either scope.
 
-If the collection isn't given by the reference, all collections will be searched to find the foreign key. If non-unique keys are found this will raise an error.
+If the collection isn't given by the reference, the existing eligible collections are searched for the foreign key and then constrained by the effective scope. Scope does not change collection selection or cross-collection ambiguity behaviour.
+
+When a relationship is unscoped, primary-key parsing, uniqueness and lookup behave as before, and resolved references do not gain a scope property.
 
 When the `primary` config is `nil`, (which is the default), the document "path" is used as the primary key. This guarantees uniqueness across the whole site. Document path is `Document#relative_path` with leading `_` and trailing `Document.extname` removed, giving strings like `products/shoes` for `shoes.md` in the `products` collection.
 
@@ -320,7 +402,7 @@ This document's links are modified with the `link` and `unlink` methods:
 
 * `link(reference)`
   * `reference` gives the document to link to, from this document. It must be in the `@to` collection.
-  * `reference:` (optional named parameter): gives a hash that the created reference hash will merge over, providing arbitrary addititional properties to the hash.
+  * `reference:` (optional named parameter): gives a hash that the created reference hash will merge over, providing arbitrary additional properties to the hash. Engine-reserved key, collection, scope, page, and count properties cannot be overwritten through this metadata.
   * `persist:` (optional named parameter, `true` or `false`): whether to remember this resolver-added link so it can be restored in later prune rounds even if the original route by which it was discovered disappears (see [Pruning](#pruning)).
 * `unlink(reference)`
   * Remove the link to the `reference`d document.
@@ -352,6 +434,8 @@ The `reference` parameter in all the above:
 * Can be a reference (i.e. a key string or reference hash). If optional `from` is passed, or the reference hash has collection info, the key lookup is constrained to that collection.
 * Can be a `Jekyll::Document` object. Its primary key and collection are read from the object.
 * Can be omitted in the helpers, in which case the method operates on *this* document.
+
+For a scoped relationship, resolver strings and hashes use the same scope inheritance and partial-override rules as frontmatter references. Passing a `Jekyll::Document` uses that target document's complete scope.
 
 ### Example
 
@@ -433,7 +517,7 @@ references:
 
 ## Pruning
 
-You can remove certain pages from your site ("prune" them) according to the number of finally-resolved relationships on them. This is controlled with a `prune` key which you add to the relationship definition:
+You can remove certain pages from your site ("prune" them) according to their finally-resolved relationship count. Tree relationships can also prune pages selected by exact frontmatter values. This is controlled with a `prune` key which you add to the relationship definition:
 
 ```yaml
 relationships:
@@ -454,6 +538,12 @@ relationships:
     prune:
       min: 2 # prune a category if it has fewer than 2 parents
       depth: -1 # only prune non-root nodes
+  - from: pages
+    to: self
+    mode: parent
+    prune:
+      where:
+        exists: false # prune pages whose exists value is the boolean false
   - from: products
     mode: parent
     to:
@@ -463,30 +553,70 @@ relationships:
         min: 2 # prune a product if it has fewer than 2 children
         depth: 1 # only prune root notes
   prune:
-    combine: true # default
-    iterations: 10 # default
+    combine: true # default; count expanded prune targets together per collection
+    iterations: 10 # default; extra prune rounds after the first pass
     tree:
       orphans: grandparents # default
 ```
 
-`prune` on each relationship/target entry allows:
+Normal relationship pruning requires `min`. Tree pruning supports a relationship mode, a frontmatter mode, or both:
 
-* `min` (required): the minimum number of related documents needed to survive.
+* Relationship mode requires both `min` and `depth`:
+  * `min`: the minimum number of related documents needed to survive.
+  * `depth`: which tree nodes are eligible for relationship-count pruning:
+    * `1` selects roots, `2` selects roots and their children, etc.
+    * `-1` and negative integers are the negation of their positive counterparts. Thus `-2` selects everything beyond the first two levels.
+* Frontmatter mode requires a non-empty `where` hash of dot-separated frontmatter paths to expected values.
 * `mode: inverse` (optional): prune the `to` side instead of the `from` side.
-* `depth` (required if pruning a tree): only for tree relationships, determines which tree nodes can be pruned:
-  * `1` selects roots, `2` would be roots and their chlidren, etc.
-  * `-1` and negative integers are the negation of their positive counterparts. So `-2` means all but the first two levels of the tree are eligible for pruning.
 
-Pruning is iterative. E.g. if pruning causes more nodes to trigger pruning rules, they will also be pruned. Each round fully resolves the tree first, then fully resolves normal relationships on top of that tree.
+When both tree modes are present, a document is pruned only when `where` matches and the `min`/`depth` mode also selects it. `where` is not supported on normal relationships.
+
+`prune` can also be `false` to disable pruning at that level. Normal relationships accept an integer as a shortcut for `prune: min: int`; tree relationships do not.
+
+### Frontmatter matching
+
+Each `where` entry is matched against the pruning subject: the `from` collection normally, or the inverse subject when `mode: inverse` is configured.
+
+```yaml
+prune:
+  where:
+    exists: false
+    meta.status: hidden
+```
+
+All entries must match. Paths traverse nested hashes only; arrays and hashes can instead be matched as complete terminal values. Matching is exact and type-sensitive, so `false` does not match `"false"`, and `1` does not match `1.0`. A present `null` matches an expected `null`, while a missing path never matches.
+
+A where-only rule prunes every matching subject regardless of its relationship count.
+
+### Combine
+
+Consider:
+
+```yaml
+- from: products
+  to: categories, services
+  prune:
+    min: 2
+```
+
+With `prune.combine: true`, the total count of links from `products` to `categories` *or* `services` would be considered. Only if this total count is below `min` would the product be pruned.
+
+With `prune.combine: false` each relationship is checked separately. If either `products` → `categories` or `products` → `services` has fewer links than `min`, the product will be pruned.
+
+### Iteration
+
+Pruning is iterative. E.g. if pruning causes more nodes to trigger pruning rules, they will also be pruned. Each round fully resolves the tree first, then fully resolves normal relationships on top of that tree. The maximum iterations can be controlled with `prune.iterations`.
+
+### Trees
 
 If pruning removes a node from a tree, any children that lose all parents become orphans. `relationships.prune.tree.orphans` controls what happens:
 
-* `grandparents` (default): reconnect to the pruned node's original grandparents, if any.
-* `grandparents required`: as above, but also remove the orphan if there is no grandparent to connect to.
+* `grandparents` (default): follow each original parent lineage through consecutively removed nodes and reconnect to its nearest surviving ancestor. Leave the document parentless if no ancestor survives.
+* `grandparents required`: reconnect as above, but remove the orphan if no original ancestor survives.
 * `prune`: prune all orphans recursively.
-* `orphan`: leave them parentless.
+* `orphan`: leave them parentless without attempting reconnection.
 
-`prune` can also be `false` to disable pruning at that level, or an integer as a shortcut for `prune: min: int`.
+Ancestor candidates retain their original order, are deduplicated, and continue to respect configured parent limits and cycle protection. Pruning does not change document URLs or permalinks.
 
 
 ## Keywords
@@ -531,6 +661,7 @@ relationships:
       frontmatter:
         foreign: data.client
 ```
+
 
 ## Notes
 

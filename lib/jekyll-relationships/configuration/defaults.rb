@@ -15,6 +15,7 @@ class Configuration
 		FRONTMATTER = {
 			'base' => 'relationships',
 			'primary' => nil,
+			'scope' => nil,
 			'foreign' => '<collection>',
 			'output' => nil
 		}.freeze

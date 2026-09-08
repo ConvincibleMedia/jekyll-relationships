@@ -36,6 +36,7 @@ class Engine
 			@relationship_states = {}
 			@document_resolution_states = {}
 			@initial_links_seeded = false
+			@defer_bidirectional_mirror_resolvers = false
 		end
 
 		# Returns true when the document is active in this session.
@@ -71,6 +72,8 @@ class Engine
 			end
 
 			ensure_initial_links_seeded!
+			return state.current_references if defer_bidirectional_mirror_resolver_for?(state)
+
 			resolve_state(state)
 			state.current_references
 		end
@@ -94,16 +97,41 @@ class Engine
 		end
 
 		# Resolves one helper or resolver reference to a document, even if inactive.
-		def resolve_reference_document(reference, primary_path:, collection_hint: nil)
-			return reference if reference.is_a?(Jekyll::Document)
+		def resolve_reference_document(reference, primary_path:, scope_fields: [], referring_document: nil, relationship: nil, collection_hint: nil)
+			if reference.is_a?(Jekyll::Document)
+				@registry.scope_for(reference, scope_fields: scope_fields, relationship: relationship)
+				return reference
+			end
 
-			parsed_reference = @configuration.reference_template.parse(reference)
-			return parsed_reference.page if parsed_reference.document?
+			parsed_reference = @configuration.reference_template.parse(
+				reference,
+				context: reference_context(relationship: relationship, document: referring_document)
+			)
+			effective_scope = @registry.effective_scope_for(
+				reference_scope: parsed_reference.scope,
+				referring_document: referring_document,
+				scope_fields: scope_fields,
+				relationship: relationship
+			)
+			if parsed_reference.document?
+				@registry.validate_scope_match!(
+					document: parsed_reference.page,
+					scope: effective_scope,
+					scope_fields: scope_fields,
+					relationship: relationship,
+					referring_document: referring_document
+				)
+				return parsed_reference.page
+			end
 
 			@registry.lookup(
 				key: parsed_reference.key,
 				primary_path: primary_path,
-				collection: collection_hint || (parsed_reference.collection.nil? ? nil : parsed_reference.collection.to_s)
+				collection: collection_hint || (parsed_reference.collection.nil? ? nil : parsed_reference.collection.to_s),
+				scope_fields: scope_fields,
+				scope: effective_scope,
+				relationship: relationship,
+				referring_document: referring_document
 			)
 		end
 
@@ -198,16 +226,12 @@ class Engine
 
 		# Resolves every configured normal relationship state once.
 		def resolve_all_relationships!
-			@configuration.collections.each do |collection|
-				definitions = @configuration.normal_relationships_for(collection)
-				next if definitions.empty?
-
-				documents_for(collection).each do |document|
-					definitions.each do |definition|
-						resolve_relationships(document, definition.to_collection)
-					end
-				end
-			end
+			@defer_bidirectional_mirror_resolvers = true
+			resolve_all_relationships_pass!
+			@defer_bidirectional_mirror_resolvers = false
+			resolve_deferred_bidirectional_mirror_resolvers!
+		ensure
+			@defer_bidirectional_mirror_resolvers = false
 		end
 
 		# Writes the current session's resolved relationships back to frontmatter.
@@ -216,6 +240,14 @@ class Engine
 		end
 
 		private
+
+		# Builds consistent relationship and source-document details for reference parsing errors.
+		def reference_context(relationship:, document:)
+			parts = []
+			parts << "Relationship `#{relationship}`" unless relationship.nil? || relationship.to_s.empty?
+			parts << "reference on document `#{document.relative_path}`" if document
+			parts.join(' ')
+		end
 
 		# Seeds every normal relationship state before any resolver mutates the graph.
 		#
@@ -243,6 +275,48 @@ class Engine
 
 			state.resolve!
 			state
+		end
+
+		# Resolves every configured normal relationship state in collection and sequence order.
+		def resolve_all_relationships_pass!
+			@configuration.collections.each do |collection|
+				definitions = @configuration.normal_relationships_for(collection)
+				next if definitions.empty?
+
+				documents_for(collection).each do |document|
+					definitions.each do |definition|
+						resolve_relationships(document, definition.to_collection)
+					end
+				end
+			end
+		end
+
+		# Runs deferred resolvers for inverse bidirectional mirrors after forward resolution settles.
+		def resolve_deferred_bidirectional_mirror_resolvers!
+			@configuration.collections.each do |collection|
+				definitions = @configuration.normal_relationships_for(collection).select do |definition|
+					deferred_bidirectional_mirror_definition?(definition)
+				end
+				next if definitions.empty?
+
+				documents_for(collection).each do |document|
+					definitions.each do |definition|
+						resolve_relationships(document, definition.to_collection)
+					end
+				end
+			end
+		end
+
+		# Returns true when one definition should run in the deferred mirror-resolver pass.
+		def deferred_bidirectional_mirror_definition?(definition)
+			definition.bidirectional_mirror? && !definition.resolver_classes.empty?
+		end
+
+		# Returns true when this state should expose current links now but defer running its resolver.
+		def defer_bidirectional_mirror_resolver_for?(state)
+			return false unless @defer_bidirectional_mirror_resolvers
+
+			deferred_bidirectional_mirror_definition?(state.definition)
 		end
 	end
 end

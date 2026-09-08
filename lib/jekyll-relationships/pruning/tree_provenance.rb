@@ -10,7 +10,7 @@ module Pruning
 #
 # Tree orphan repair needs stable provenance even after many prune rounds. This
 # helper snapshots the first fully built tree graph before any pruning so later
-# orphan handling can reattach surviving grandparents in deterministic order.
+# orphan handling can reattach nearest surviving ancestors in deterministic order.
 class TreeProvenance
 	# Builds one immutable provenance index from one tree graph.
 	def initialize(tree_graph:)

@@ -24,26 +24,27 @@ class Accumulator
 	end
 
 	# Adds one resolved relationship entry.
-	def add(document:, key:, metadata: nil, count: 1)
-		add_result(document: document, key: key, metadata: metadata, count: count) != :ignored
+	def add(document:, key:, scope: nil, metadata: nil, count: 1)
+		add_result(document: document, key: key, scope: scope, metadata: metadata, count: count) != :ignored
 	end
 
 	# Adds one resolved relationship entry and returns how it changed the set.
-	def add_result(document:, key:, metadata: nil, count: 1)
+	def add_result(document:, key:, scope: nil, metadata: nil, count: 1)
 		add_detailed_result(
 			document: document,
 			key: key,
+			scope: scope,
 			metadata: metadata,
 			count: count
 		).fetch(:action)
 	end
 
 	# Adds one resolved relationship entry and returns the stored entry as well.
-	def add_detailed_result(document:, key:, metadata: nil, count: 1)
+	def add_detailed_result(document:, key:, scope: nil, metadata: nil, count: 1)
 		if @multiple_settings.keep?
 			return {
 				action: :added,
-				entry: append_entry(document: document, key: key, metadata: metadata, count: 1)
+				entry: append_entry(document: document, key: key, scope: scope, metadata: metadata, count: 1)
 			}
 		end
 
@@ -68,6 +69,7 @@ class Accumulator
 		entry = append_entry(
 			document: document,
 			key: key,
+			scope: scope,
 			metadata: metadata,
 			count: counted_mode? ? normalise_count(count) : 1
 		)
@@ -157,10 +159,11 @@ class Accumulator
 	end
 
 	# Appends one entry while recording its first-seen order.
-	def append_entry(document:, key:, metadata:, count:)
+	def append_entry(document:, key:, scope:, metadata:, count:)
 		entry = {
 			document: document,
 			key: key,
+			scope: duplicate_scope(scope),
 			metadata: normalise_metadata(metadata),
 			count: count,
 			first_seen_index: @next_position
@@ -184,6 +187,7 @@ class Accumulator
 		{
 			document: entry.fetch(:document),
 			key: entry.fetch(:key),
+			scope: duplicate_scope(entry.fetch(:scope)),
 			metadata: normalise_metadata(entry.fetch(:metadata)),
 			count: entry.fetch(:count),
 			first_seen_index: entry.fetch(:first_seen_index)
@@ -195,9 +199,17 @@ class Accumulator
 		@reference_template.build(
 			document: entry.fetch(:document),
 			key: entry.fetch(:key),
+			scope: entry.fetch(:scope),
 			metadata: entry.fetch(:metadata),
 			count: entry.fetch(:count)
 		)
+	end
+
+	# Returns a shallow copy of one complete scope hash while preserving scalar values exactly.
+	def duplicate_scope(scope)
+		return nil if scope.nil?
+
+		normalise_metadata(scope)
 	end
 
 	# Merges later metadata under the first-seen metadata.

@@ -12,13 +12,14 @@ module Definitions
 # and which frontmatter, maximum, URL, and primary-key rules should be used to
 # resolve references for this concrete relationship definition.
 class TreeRelationship
-	attr_reader :from_collection, :to_collection, :primary_path, :tree_settings, :sequence
+	attr_reader :from_collection, :to_collection, :primary_path, :scope_fields, :tree_settings, :sequence
 
 	# Captures the allowed parent-child directions for one tree definition.
-	def initialize(from_collection:, to_collection:, primary_path:, parent_child_pairs:, tree_settings:, debug:, sequence:)
+	def initialize(from_collection:, to_collection:, primary_path:, scope_fields: [], parent_child_pairs:, tree_settings:, debug:, sequence:)
 		@from_collection = from_collection
 		@to_collection = to_collection
 		@primary_path = primary_path
+		@scope_fields = scope_fields.freeze
 		@parent_child_pairs = parent_child_pairs
 		@tree_settings = tree_settings
 		@debug = debug

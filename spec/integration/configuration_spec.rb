@@ -466,6 +466,271 @@ RSpec.describe 'relationships configuration' do
 		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /must define `prune.depth` when pruning a tree relationship/i)
 	end
 
+	it 'stores a normalised where-only tree prune rule' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'categories',
+						'to' => 'self',
+						'mode' => 'parent',
+						'prune' => {
+							'mode' => 'inverse',
+							'where' => {
+								' meta.status ' => 'hidden',
+								'meta.reason' => nil
+							}
+						}
+					}
+				]
+			}
+		)
+
+		rule = configuration.tree_prune_rules.fetch(0)
+		expect(rule.subject_collection).to eq('categories')
+		expect(rule.where).to eq({
+			'meta.status' => 'hidden',
+			'meta.reason' => nil
+		})
+		expect(rule.min).to be_nil
+		expect(rule.depth).to be_nil
+		expect(rule.inverse?).to eq(true)
+	end
+
+	it 'stores combined relationship and where tree prune modes' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'categories',
+						'to' => 'self',
+						'mode' => 'parent',
+						'prune' => {
+							'min' => 2,
+							'depth' => -1,
+							'where' => {
+								'hidden' => true
+							}
+						}
+					}
+				]
+			}
+		)
+
+		rule = configuration.tree_prune_rules.fetch(0)
+		expect(rule.min).to eq(2)
+		expect(rule.depth).to eq(-1)
+		expect(rule.where).to eq('hidden' => true)
+	end
+
+	it 'rejects empty and malformed tree prune where hashes' do
+		[
+			{},
+			{ '' => 'hidden' },
+			{ ' ' => 'hidden' },
+			{ '.meta' => 'hidden' },
+			{ 'meta.' => 'hidden' },
+			{ 'meta..status' => 'hidden' }
+		].each do |where|
+			expect do
+				Jekyll::Plugins::Relationships::Configuration.new(
+					'relationships' => {
+						'relationships' => [
+							{
+								'from' => 'categories',
+								'to' => 'self',
+								'mode' => 'parent',
+								'prune' => {
+									'where' => where
+								}
+							}
+						]
+					}
+				)
+			end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /prune\.where/i)
+		end
+	end
+
+	it 'rejects non-hash tree prune where values' do
+		[nil, false, 'hidden', []].each do |where|
+			expect do
+				Jekyll::Plugins::Relationships::Configuration.new(
+					'relationships' => {
+						'relationships' => [
+							{
+								'from' => 'categories',
+								'to' => 'self',
+								'mode' => 'parent',
+								'prune' => {
+									'where' => where
+								}
+							}
+						]
+					}
+				)
+			end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /prune\.where.*non-empty hash/i)
+		end
+	end
+
+	it 'rejects duplicate normalised tree prune where paths' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'categories',
+							'to' => 'self',
+							'mode' => 'parent',
+							'prune' => {
+								'where' => {
+									' meta.status ' => 'hidden',
+									'meta.status' => 'archived'
+								}
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /defines path `meta.status` more than once/i)
+	end
+
+	it 'applies target-level where overrides and disables inherited where rules' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'relationships' => [
+					{
+						'from' => 'pages',
+						'to' => [
+							{ 'collection' => 'sections', 'mode' => 'parent' },
+							{
+								'collection' => 'categories',
+								'mode' => 'parent',
+								'prune' => {
+									'where' => {
+										'archived' => true
+									}
+								}
+							},
+							{
+								'collection' => 'groups',
+								'mode' => 'parent',
+								'prune' => false
+							}
+						],
+						'prune' => {
+							'where' => {
+								'hidden' => true
+							}
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.tree_prune_rules.map do |rule|
+				[
+					rule.members.map(&:to_collection),
+					rule.where
+				]
+			end
+		).to eq([
+			[['sections'], { 'hidden' => true }],
+			[['categories'], { 'archived' => true }]
+		])
+	end
+
+	it 'expands where rules per tree member when combine is false' do
+		configuration = Jekyll::Plugins::Relationships::Configuration.new(
+			'relationships' => {
+				'prune' => {
+					'combine' => false
+				},
+				'relationships' => [
+					{
+						'from' => 'pages',
+						'to' => 'sections, categories',
+						'mode' => 'parent',
+						'prune' => {
+							'where' => {
+								'hidden' => true
+							}
+						}
+					}
+				]
+			}
+		)
+
+		expect(
+			configuration.tree_prune_rules.map do |rule|
+				[
+					rule.members.map(&:to_collection),
+					rule.where
+				]
+			end
+		).to eq([
+			[['sections'], { 'hidden' => true }],
+			[['categories'], { 'hidden' => true }]
+		])
+	end
+
+	it 'rejects a tree prune block without a complete mode' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'categories',
+							'to' => 'self',
+							'mode' => 'parent',
+							'prune' => {}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /must define either `prune.where` or both `prune.min` and `prune.depth`/i)
+	end
+
+	it 'rejects where on normal prune rules' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'products',
+							'to' => 'categories',
+							'prune' => {
+								'min' => 1,
+								'where' => {
+									'hidden' => true
+								}
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /cannot define `prune.where` on a normal relationship/i)
+	end
+
+	it 'requires min when a tree prune rule defines depth' do
+		expect do
+			Jekyll::Plugins::Relationships::Configuration.new(
+				'relationships' => {
+					'relationships' => [
+						{
+							'from' => 'categories',
+							'to' => 'self',
+							'mode' => 'parent',
+							'prune' => {
+								'depth' => -1
+							}
+						}
+					]
+				}
+			)
+		end.to raise_error(Jekyll::Plugins::Relationships::ConfigurationError, /must define `prune.min` when defining `prune.depth`/i)
+	end
+
 	it 'rejects integer prune shorthand on tree relationships' do
 		expect do
 			Jekyll::Plugins::Relationships::Configuration.new(

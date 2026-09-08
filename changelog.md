@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0.alpha
+
+In progress.
+
+* Scopes: can now define a `scope` in which primary key references are to be evaluated, and the scope value can come implicitly from the referring document.
+* Ensure forward relationships resolve before inverse ones which should be merely mirrors
+
 ## 0.1.1.alpha
 
 * Various major bug fixes.

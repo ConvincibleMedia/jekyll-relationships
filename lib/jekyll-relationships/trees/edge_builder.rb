@@ -53,8 +53,8 @@ class EdgeBuilder
 
 		@graph.documents_for(child_collection).each do |child_document|
 			path_configuration.parent_input_paths(max_parents: definition.tree_settings.max_parents).each do |path|
-				parse_references(@data_path.read(child_document.data, path)).each do |reference|
-					parent_document = resolve_reference(reference: reference, primary_path: definition.primary_path)
+				parse_references(@data_path.read(child_document.data, path), definition: definition, document: child_document).each do |reference|
+					parent_document = resolve_reference(reference: reference, definition: definition, referring_document: child_document)
 					next unless parent_document
 					next unless parent_document.collection.label == parent_collection
 
@@ -88,8 +88,8 @@ class EdgeBuilder
 
 		@graph.documents_for(parent_collection).each do |parent_document|
 			path_configuration.child_input_paths(max_children: definition.tree_settings.max_children).each do |path|
-				parse_references(@data_path.read(parent_document.data, path)).each do |reference|
-					child_document = resolve_reference(reference: reference, primary_path: definition.primary_path)
+				parse_references(@data_path.read(parent_document.data, path), definition: definition, document: parent_document).each do |reference|
+					child_document = resolve_reference(reference: reference, definition: definition, referring_document: parent_document)
 					next unless child_document
 					next unless child_document.collection.label == child_collection
 
@@ -132,7 +132,7 @@ class EdgeBuilder
 					parents = fetch_nested(url_index, parent_collection, parent_parts)
 					next unless parents
 
-					parents.each do |parent_document|
+					parents.select { |parent_document| same_scope?(first_document: child_document, second_document: parent_document, definition: definition) }.each do |parent_document|
 						@graph.add_edge(
 							parent_document: parent_document,
 							child_document: child_document,
@@ -162,22 +162,54 @@ class EdgeBuilder
 	end
 
 	# Parses one tree frontmatter value into parsed references.
-	def parse_references(value)
+	def parse_references(value, definition:, document:)
 		@string_array.interpret(value, split: -1, flatten: true).map do |entry|
-			@configuration.reference_template.parse(entry)
+			@configuration.reference_template.parse(
+				entry,
+				context: "Relationship `#{definition.from_collection} -> #{definition.to_collection}` reference on document `#{document.relative_path}`"
+			)
 		end.compact
 	end
 
 	# Resolves one parsed reference to a real document.
-	def resolve_reference(reference:, primary_path:)
-		return reference.page if reference.document?
+	def resolve_reference(reference:, definition:, referring_document:)
+		relationship = "#{definition.from_collection} -> #{definition.to_collection}"
+		effective_scope = @registry.effective_scope_for(
+			reference_scope: reference.scope,
+			referring_document: referring_document,
+			scope_fields: definition.scope_fields,
+			relationship: relationship
+		)
+		if reference.document?
+			@registry.validate_scope_match!(
+				document: reference.page,
+				scope: effective_scope,
+				scope_fields: definition.scope_fields,
+				relationship: relationship,
+				referring_document: referring_document
+			)
+			return reference.page
+		end
 
 		collection = reference.collection.to_s unless reference.collection.nil?
 		@registry.lookup(
 			key: reference.key,
-			primary_path: primary_path,
-			collection: collection
+			primary_path: definition.primary_path,
+			collection: collection,
+			scope_fields: definition.scope_fields,
+			scope: effective_scope,
+			relationship: relationship,
+			referring_document: referring_document
 		)
+	end
+
+	# Returns true when two URL-selected documents share the definition's complete scope.
+	def same_scope?(first_document:, second_document:, definition:)
+		return true if definition.scope_fields.empty?
+
+		relationship = "#{definition.from_collection} -> #{definition.to_collection}"
+		@registry.scope_for(first_document, scope_fields: definition.scope_fields, relationship: relationship) ==
+			@registry.scope_for(second_document, scope_fields: definition.scope_fields, relationship: relationship)
 	end
 
 	# Reads one nested hash value without creating a default entry.

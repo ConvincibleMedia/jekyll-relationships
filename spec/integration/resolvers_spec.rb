@@ -152,6 +152,56 @@ RSpec.describe 'relationship resolvers' do
 		end
 	end
 
+	it 'runs inverse bidirectional resolvers after forward resolvers so mirrored links are visible' do
+		define_resolver('ProjectIndustriesFromClients', from: 'projects', to: 'industries') do
+			def resolve
+				relationships(to: 'clients').each do |client|
+					relationships(client, to: 'industries').each do |industry|
+						link(industry)
+					end
+				end
+			end
+		end
+
+		define_resolver('IndustryProjectCount', from: 'industries', to: 'projects') do
+			def resolve
+				document.data['meta'] ||= {}
+				document.data['meta']['links'] ||= {}
+				document.data['meta']['links']['counts'] ||= {}
+				document.data['meta']['links']['counts']['projects'] = relationships.size
+			end
+		end
+
+		relationships = {
+			'relationships' => [
+				{ 'from' => 'clients', 'to' => 'industries' },
+				{ 'from' => 'projects', 'to' => 'clients' },
+				{ 'from' => 'projects', 'to' => 'industries', 'mode' => 'bidirectional' }
+			]
+		}
+
+		files = relationship_site_files(
+			collection_document('clients', 'acme', {
+				'relationships' => {
+					'industries' => ['industries/technology']
+				}
+			}),
+			collection_document('projects', 'alpha', {
+				'relationships' => {
+					'clients' => ['clients/acme']
+				}
+			}),
+			collection_document('industries', 'technology')
+		)
+
+		build_relationship_site(collections: %w[clients industries projects], relationships: relationships, files: files) do |site, _files|
+			industry = document_for(site, 'industries', 'technology')
+
+			expect(reference_ids(industry.data.fetch('relationships').fetch('projects'))).to eq(['projects/alpha'])
+			expect(industry.data.fetch('meta').fetch('links').fetch('counts').fetch('projects')).to eq(1)
+		end
+	end
+
 	it 'can keep a persisted resolver link after the intermediary document is pruned in a later round' do
 		define_resolver('ProjectServicesViaClientsPersisted', from: 'projects', to: 'services') do
 			def resolve

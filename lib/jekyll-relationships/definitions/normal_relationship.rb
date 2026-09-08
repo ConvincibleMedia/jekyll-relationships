@@ -11,14 +11,15 @@ module Definitions
 # Each instance describes one source collection, one target collection, and the
 # resolved frontmatter rules that apply to links between them.
 class NormalRelationship
-	attr_reader :from_collection, :to_collection, :primary_path, :foreign_paths,
+	attr_reader :from_collection, :to_collection, :primary_path, :scope_fields, :foreign_paths,
 		:output_path, :sequence, :reads_frontmatter, :bidirectional, :resolver_classes
 
 	# Captures the resolved configuration for one concrete pair.
-	def initialize(from_collection:, to_collection:, primary_path:, foreign_paths:, output_path:, debug:, sequence:, reads_frontmatter:, bidirectional:)
+	def initialize(from_collection:, to_collection:, primary_path:, scope_fields: [], foreign_paths:, output_path:, debug:, sequence:, reads_frontmatter:, bidirectional:)
 		@from_collection = from_collection
 		@to_collection = to_collection
 		@primary_path = primary_path
+		@scope_fields = scope_fields.freeze
 		@foreign_paths = foreign_paths
 		@output_path = output_path
 		@debug = debug
@@ -36,6 +37,11 @@ class NormalRelationship
 	# Returns true when extra debug logging should be emitted for this pair.
 	def debug?(area = nil)
 		@debug.enabled?(area)
+	end
+
+	# Returns true when this relationship is the synthetic inverse of a bidirectional pair.
+	def bidirectional_mirror?
+		@bidirectional && !@reads_frontmatter
 	end
 
 	# Returns true when one event's related IDs satisfy this pair's debug filter.

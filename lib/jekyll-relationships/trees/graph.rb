@@ -30,11 +30,14 @@ class Graph
 		@descendant_cache = {}
 		@root_distance_cache = nil
 		@primary_path_by_collection = {}
+		@scope_fields_by_collection = {}
 		@tree_collections = @configuration.tree_relationships.each_with_object(Set.new) do |definition, collections|
 			collections << definition.from_collection
 			collections << definition.to_collection
 			@primary_path_by_collection[definition.from_collection] ||= definition.primary_path
 			@primary_path_by_collection[definition.to_collection] ||= definition.primary_path
+			@scope_fields_by_collection[definition.from_collection] ||= definition.scope_fields
+			@scope_fields_by_collection[definition.to_collection] ||= definition.scope_fields
 		end
 		@edge_builder = EdgeBuilder.new(
 			graph: self,
@@ -99,19 +102,21 @@ class Graph
 	end
 
 	# Returns immediate parents as canonical reference hashes.
-	def parents_for(document, primary_path: nil)
+	def parents_for(document, primary_path: nil, scope_fields: nil)
 		return [] unless active_document?(document)
 
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
-		@parents[document].map { |parent| build_reference(parent, primary_path: resolved_primary_path) }
+		resolved_scope_fields = resolve_scope_fields(document: document, scope_fields: scope_fields)
+		@parents[document].map { |parent| build_reference(parent, primary_path: resolved_primary_path, scope_fields: resolved_scope_fields) }
 	end
 
 	# Returns immediate children as canonical reference hashes.
-	def children_for(document, primary_path: nil)
+	def children_for(document, primary_path: nil, scope_fields: nil)
 		return [] unless active_document?(document)
 
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
-		@children[document].map { |child| build_reference(child, primary_path: resolved_primary_path) }
+		resolved_scope_fields = resolve_scope_fields(document: document, scope_fields: scope_fields)
+		@children[document].map { |child| build_reference(child, primary_path: resolved_primary_path, scope_fields: resolved_scope_fields) }
 	end
 
 	# Returns the immediate parent documents in deterministic insertion order.
@@ -143,26 +148,30 @@ class Graph
 	end
 
 	# Returns ancestor references filtered by minimum and maximum distance.
-	def ancestors_for(document, primary_path: nil, min: 0, max: -1)
+	def ancestors_for(document, primary_path: nil, scope_fields: nil, min: 0, max: -1)
 		return [] unless active_document?(document)
 
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
+		resolved_scope_fields = resolve_scope_fields(document: document, scope_fields: scope_fields)
 		filter_distances(
 			distance_map_for(document: document, direction: :up),
 			primary_path: resolved_primary_path,
+			scope_fields: resolved_scope_fields,
 			min: min,
 			max: max
 		)
 	end
 
 	# Returns descendant references filtered by minimum and maximum distance.
-	def descendants_for(document, primary_path: nil, min: 0, max: -1)
+	def descendants_for(document, primary_path: nil, scope_fields: nil, min: 0, max: -1)
 		return [] unless active_document?(document)
 
 		resolved_primary_path = resolve_primary_path(document: document, primary_path: primary_path)
+		resolved_scope_fields = resolve_scope_fields(document: document, scope_fields: scope_fields)
 		filter_distances(
 			distance_map_for(document: document, direction: :down),
 			primary_path: resolved_primary_path,
+			scope_fields: resolved_scope_fields,
 			min: min,
 			max: max
 		)
@@ -316,10 +325,10 @@ class Graph
 		frontmatter = definition.tree_settings.frontmatter
 
 		definition_documents(definition).each do |document|
-			parent_values = parents_for(document, primary_path: definition.primary_path)
-			child_values = children_for(document, primary_path: definition.primary_path)
-			ancestor_values = ancestors_for(document, primary_path: definition.primary_path, min: 0)
-			descendant_values = descendants_for(document, primary_path: definition.primary_path, min: 0)
+			parent_values = parents_for(document, primary_path: definition.primary_path, scope_fields: definition.scope_fields)
+			child_values = children_for(document, primary_path: definition.primary_path, scope_fields: definition.scope_fields)
+			ancestor_values = ancestors_for(document, primary_path: definition.primary_path, scope_fields: definition.scope_fields, min: 0)
+			descendant_values = descendants_for(document, primary_path: definition.primary_path, scope_fields: definition.scope_fields, min: 0)
 			depth_value = root_distance_for(document)
 
 			if frontmatter.output_path
@@ -402,6 +411,13 @@ class Graph
 		@primary_path_by_collection[document.collection.label]
 	end
 
+	# Chooses explicit scope fields, or the collection's first tree scope scheme for public helper calls.
+	def resolve_scope_fields(document:, scope_fields:)
+		return scope_fields unless scope_fields.nil?
+
+		@scope_fields_by_collection[document.collection.label] || []
+	end
+
 	# Returns true when one edge already exists.
 	def edge_exists?(parent_document:, child_document:)
 		@parents[child_document].include?(parent_document)
@@ -471,20 +487,21 @@ class Graph
 	end
 
 	# Filters one distance map to the requested range and builds references.
-	def filter_distances(distance_map, primary_path:, min:, max:)
+	def filter_distances(distance_map, primary_path:, scope_fields:, min:, max:)
 		distance_map.each_with_object([]) do |(document, distance), references|
 			next if distance < min
 			next if max != -1 && distance > max
 
-			references << build_reference(document, primary_path: primary_path, distance: distance)
+			references << build_reference(document, primary_path: primary_path, scope_fields: scope_fields, distance: distance)
 		end
 	end
 
 	# Builds one canonical reference hash, optionally including distance.
-	def build_reference(document, primary_path:, distance: nil)
+	def build_reference(document, primary_path:, scope_fields:, distance: nil)
 		reference = @configuration.reference_template.build(
 			document: document,
 			key: @registry.key_for(document, primary_path: primary_path),
+			scope: @registry.scope_for(document, scope_fields: scope_fields),
 			include_count: false
 		)
 		reference['distance'] = distance unless distance.nil?
