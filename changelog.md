@@ -2,10 +2,9 @@
 
 ## 0.2.0.alpha
 
-In progress.
-
 * Scopes: can now define a `scope` in which primary key references are to be evaluated, and the scope value can come implicitly from the referring document.
 * Ensure forward relationships resolve before inverse ones which should be merely mirrors
+* Tree pruning can now select documents by exact frontmatter values with `prune.where`, including combined `min`/`depth` selection and transitive orphan reconnection.
 
 ## 0.1.1.alpha
 
